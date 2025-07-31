@@ -29,7 +29,7 @@ class TelegramSummaryBot:
         self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')  # Chat ID של האדמין
         
         # אתחול OpenAI
-        self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
+        openai.api_key = self.openai_api_key
         
         # אתחול הבוט
         self.application = Application.builder().token(self.bot_token).build()
@@ -70,68 +70,19 @@ class TelegramSummaryBot:
             posts = []
             since_date = datetime.now(self.israel_tz) - timedelta(days=days_back)
             
-            # קבלת מידע על הערוץ
-            chat = await self.bot.get_chat(f"@{self.channel_username}")
-            chat_id = chat.id
+            # קריאת הודעות מהערוץ
+            async for message in self.bot.iter_history(f"@{self.channel_username}", limit=100):
+                if message.date.replace(tzinfo=pytz.UTC).astimezone(self.israel_tz) < since_date:
+                    break
+                
+                if message.text:
+                    posts.append({
+                        'date': message.date.strftime('%Y-%m-%d %H:%M'),
+                        'text': message.text,
+                        'message_id': message.message_id
+                    })
             
-            # ננסה לקרוא הודעות מהערוץ
-            # זה יעבוד רק אם הבוט הוא אדמין בערוץ או אם הערוץ ציבורי
-            try:
-                # נקבל הודעות מהערוץ באמצעות message_id
-                # נתחיל מההודעה האחרונה ונרד אחורה
-                latest_message_id = None
-                
-                # ננסה לקבל מידע על הודעות אחרונות
-                # מאחר שאין API ישיר לקריאת היסטוריה, נשתמש בגישה אחרת
-                
-                # נשמור הודעות שהבוט יקבל בזמן אמת במשתנה גלובלי
-                # או נקרא מקובץ אם יש כזה
-                
-                # לעת עתה, ניצור דוגמאות לבדיקה
-                current_time = datetime.now(self.israel_tz)
-                
-                sample_posts = [
-                    {
-                        'date': (current_time - timedelta(days=1)).strftime('%Y-%m-%d %H:%M'),
-                        'text': '🚀 עדכון חדש ב-Android Studio: תמיכה משופרת ב-Compose UI עם כלים חדשים לעיצוב ממשקי משתמש',
-                        'message_id': 1001
-                    },
-                    {
-                        'date': (current_time - timedelta(days=2)).strftime('%Y-%m-%d %H:%M'),
-                        'text': '🤖 OpenAI הכריזה על GPT-4 Turbo החדש עם חלון הקשר של 128K טוקנים ומחירים מופחתים',
-                        'message_id': 1002
-                    },
-                    {
-                        'date': (current_time - timedelta(days=3)).strftime('%Y-%m-%d %H:%M'),
-                        'text': '📱 Google משיקה את Android 14 QPR2 עם שיפורים בביטחון ותכונות AI חדשות',
-                        'message_id': 1003
-                    },
-                    {
-                        'date': (current_time - timedelta(days=4)).strftime('%Y-%m-%d %H:%M'),
-                        'text': '💡 Meta מכריזה על Llama 2 החדש - מודל שפה פתוח מתקדם לפיתוח יישומי AI',
-                        'message_id': 1004
-                    },
-                    {
-                        'date': (current_time - timedelta(days=5)).strftime('%Y-%m-%d %H:%M'),
-                        'text': '🔧 Kotlin Multiplatform מגיע לגרסת יציבות - פיתוח אפליקציות חוצות פלטפורמות בקלות',
-                        'message_id': 1005
-                    }
-                ]
-                
-                # סינון פוסטים לפי התאריך
-                for post in sample_posts:
-                    post_date = datetime.strptime(post['date'], '%Y-%m-%d %H:%M')
-                    post_date = self.israel_tz.localize(post_date)
-                    if post_date >= since_date:
-                        posts.append(post)
-                
-                logger.info(f"נמצאו {len(posts)} פוסטים מהימים האחרונים")
-                
-            except Exception as inner_e:
-                logger.error(f"שגיאה בקריאת הודעות: {inner_e}")
-                posts = []
-            
-            return posts
+            return posts[::-1]  # סדר כרונולוגי
             
         except Exception as e:
             logger.error(f"שגיאה בקריאת פוסטים: {e}")
@@ -167,7 +118,7 @@ class TelegramSummaryBot:
 """
         
         try:
-            response = self.openai_client.chat.completions.create(
+            response = openai.ChatCompletion.create(
                 model="gpt-4-turbo-preview",
                 messages=[
                     {"role": "system", "content": "אתה מומחה לטכנולוגיה ו-AI שכותב סיכומים בעברית"},
