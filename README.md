@@ -13,24 +13,6 @@
 
 ## 🔧 הגדרה ראשונית
 
-### 0. הגדרת סביבת Python (אופציונלי - לפיתוח מקומי)
-אם אתה רוצה להריץ את הבוט במקומי או נתקלת בבעיות תאימות עם Python 3.13:
-
-```bash
-# יצירת סביבה וירטואלית
-python3 -m venv .venv
-
-# הפעלת הסביבה הוירטואלית
-source .venv/bin/activate  # Linux/Mac
-# או
-.venv\Scripts\activate     # Windows
-
-# התקנת התלויות
-pip install -r requirements.txt
-```
-
-**הערה חשובה**: הפרויקט תוקן לתמיכה מלאה ב-Python 3.13 עם python-telegram-bot גרסה 21.3.
-
 ### 1. יצירת הבוט בטלגרם
 1. פתח שיחה עם [@BotFather](https://t.me/BotFather)
 2. שלח `/newbot`
@@ -124,15 +106,6 @@ posts = await self.get_channel_posts(days_back=14)  # 14 ימים במקום 7
 ```
 
 ## 🐛 פתרון בעיות
-
-### שגיאת AttributeError עם Python 3.13:
-אם אתה מקבל שגיאה כמו:
-```
-AttributeError: 'Updater' object has no attribute '_Updater__polling_cleanup_cb'
-```
-זה אומר שאתה משתמש בגרסה ישנה של python-telegram-bot. הפתרון:
-- ✅ עדכן ל-python-telegram-bot גרסה 21.3 או חדשה יותר
-- ✅ השתמש בסביבה וירטואלית כמו שמתואר למעלה
 
 ### הבוט לא קורא הודעות:
 - ✅ ודא שהבוט מנהל בערוץ
