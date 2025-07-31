@@ -1,16 +1,12 @@
 services:
   - type: web
-    name: telegram-summary-bot
-    env: python
+    name: Sammery
+    # ------------------------------------------------------------------
+    # השינוי המרכזי: הגדרת סביבת הריצה ל-Docker
+    # Render יחפש כעת את קובץ ה-Dockerfile שבפרויקט ויבנה לפיו.
+    env: docker
+    # ------------------------------------------------------------------
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python main.py
+    healthCheckPath: /
     envVars:
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: CHANNEL_USERNAME
-        value: AndroidAndAI
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: ADMIN_CHAT_ID
-        sync: false
+      - fromGroup: sammery-secrets
