@@ -79,6 +79,7 @@ class TelegramSummaryBot:
         # משתני מצב
         self.pending_summary = None
         self.israel_tz = pytz.timezone('Asia/Jerusalem')
+        self.auto_publish_enabled = False  # הוספת משתנה למצב פרסום אוטומטי (כבוי כברירת מחדל)
         
         # הוספת handlers
         self._setup_handlers()
@@ -95,6 +96,9 @@ class TelegramSummaryBot:
         self.application.add_handler(CommandHandler("show_schedule", self.show_schedule_command))
         self.application.add_handler(CommandHandler("stats", self.show_stats))
         # שים לב: הפקודה cancel_schedule_command הוסרה כי היא מטופלת עכשיו בכפתור.
+
+        # --- הוספת handler למפסק האוטומטי ---
+        self.application.add_handler(CommandHandler("toggle_autopublish", self.toggle_autopublish_command))
 
         # --- Handlers לקליטת פוסטים ---
         self.application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, self.handle_new_channel_post))
@@ -509,58 +513,85 @@ class TelegramSummaryBot:
             return False
     
     async def scheduled_summary(self):
-        """סיכום מתוזמן"""
+        """
+        יוצר סיכום מתוזמן.
+        פועל במצב אוטומטי או ידני בהתאם למפסק auto_publish_enabled.
+        """
+        logger.info("--- Scheduled summary job started ---")
+        logger.info(f"Current auto-publish mode: {'ON' if self.auto_publish_enabled else 'OFF'}")
+
         try:
-            logger.info("מתחיל יצירת סיכום מתוזמן")
-            
-            # יצירת הסיכום
             posts = await self.get_channel_posts()
+            if not posts:
+                logger.info("No new posts found for scheduled summary. Aborting.")
+                await self.application.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text="🤖 בוצע ניסיון סיכום אוטומטי, אך לא נמצאו פוסטים חדשים."
+                )
+                return
+
             summary = await self.create_summary_with_gpt4(posts)
-            
-            # שליחת הסיכום לאדמין לאישור
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("📢 פרסם", callback_data="publish"),
-                    InlineKeyboardButton("🔄 צור חדש", callback_data="regenerate")
-                ]
-            ])
-            
             self.pending_summary = summary
-            
-            # בדיקה אם יש תמונה לשליחה יחד עם הודעת התצוגה המקדימה
-            image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
-            if image_file_id:
-                try:
-                    await self.application.bot.send_photo(
+
+            # --- לוגיקת המפסק ---
+            if self.auto_publish_enabled:
+                # מצב אוטומטי: פרסם ישירות
+                logger.info("Auto-publish is ON. Proceeding with direct publishing.")
+                success = await self.publish_summary()
+                if success:
+                    await self.application.bot.send_message(
                         chat_id=self.admin_chat_id,
-                        photo=image_file_id,
-                        caption=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
-                        reply_markup=keyboard,
-                        parse_mode=ParseMode.HTML
+                        text="✅ הסיכום השבועי פורסם אוטומטית בהצלחה!"
                     )
-                except Exception as img_error:
-                    logger.warning(f"Failed to send image with scheduled summary preview: {img_error}")
-                    # אם נכשלה שליחת התמונה, נשלח רק טקסט
+                    # כבה את המצב האוטומטי חזרה לברירת המחדל הבטוחה
+                    self.auto_publish_enabled = False
+                    logger.info("Auto-publish mode has been reset to OFF after successful run.")
+            else:
+                # מצב ידני: שלח לאישור האדמין (ההתנהגות המקורית)
+                logger.info("Auto-publish is OFF. Sending for manual approval.")
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📢 פרסם", callback_data="publish")],
+                    [InlineKeyboardButton("🔄 צור חדש", callback_data="regenerate")]
+                ])
+                
+                # בדיקה אם יש תמונה לשליחה יחד עם הודעת התצוגה המקדימה
+                image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
+                if image_file_id:
+                    try:
+                        await self.application.bot.send_photo(
+                            chat_id=self.admin_chat_id,
+                            photo=image_file_id,
+                            caption=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
+                            reply_markup=keyboard,
+                            parse_mode=ParseMode.HTML
+                        )
+                    except Exception as img_error:
+                        logger.warning(f"Failed to send image with scheduled summary preview: {img_error}")
+                        # אם נכשלה שליחת התמונה, נשלח רק טקסט
+                        await self.application.bot.send_message(
+                            chat_id=self.admin_chat_id,
+                            text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
+                            reply_markup=keyboard,
+                            parse_mode=ParseMode.HTML
+                        )
+                else:
                     await self.application.bot.send_message(
                         chat_id=self.admin_chat_id,
                         text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
                         reply_markup=keyboard,
                         parse_mode=ParseMode.HTML
                     )
-            else:
-                await self.application.bot.send_message(
-                    chat_id=self.admin_chat_id,
-                    text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
-                    reply_markup=keyboard,
-                    parse_mode=ParseMode.HTML
-                )
-            
+
         except Exception as e:
-            logger.error(f"שגיאה בסיכום המתוזמן: {e}")
+            logger.error(f"A critical error occurred in the scheduled_summary job: {e}", exc_info=True)
             await self.application.bot.send_message(
                 chat_id=self.admin_chat_id,
-                text=f"שגיאה ביצירת הסיכום האוטומטי: {str(e)}"
+                text=f"שגיאה קריטית בתהליך הסיכום האוטומטי: {str(e)}"
             )
+        finally:
+            # אל תנקה את pending_summary כאן, כי במצב ידני הוא נחוץ ללחיצת הכפתור
+            if self.auto_publish_enabled: # נקה רק אם היינו במצב אוטומטי
+                self.pending_summary = None
     
     async def schedule_summary_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """מציג לאדמין כפתורים לבחירת שעת התזמון."""
@@ -653,6 +684,28 @@ class TelegramSummaryBot:
         except Exception as e:
             logger.error(f"Failed to retrieve stats from database: {e}", exc_info=True)
             await update.message.reply_text("שגיאה בקבלת הסטטיסטיקות ממאגר הנתונים.")
+
+    async def toggle_autopublish_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """פקודה להפעלה/כיבוי של מצב פרסום אוטומטי."""
+        if str(update.effective_user.id) != self.admin_chat_id:
+            return  # רק לאדמין
+
+        # הופכים את המצב
+        self.auto_publish_enabled = not self.auto_publish_enabled
+
+        if self.auto_publish_enabled:
+            status_text = "🟢 מופעל"
+            message = (
+                "✅ מצב פרסום אוטומטי הופעל.\n\n"
+                "בפעם הבאה שהתזמון ירוץ, הסיכום יפורסם ישירות לערוץ. "
+                "לאחר הפרסום, המצב יתכבה אוטומטית ויחזור לאישור ידני."
+            )
+        else:
+            status_text = "🔴 כבוי"
+            message = "❌ מצב פרסום אוטומטי כובה. הסיכומים ימשיכו להגיע אליך לאישור ידני."
+
+        logger.info(f"Auto-publish mode toggled. New status: {status_text}")
+        await update.message.reply_text(message)
     
     def set_weekly_schedule(self, time_str: str):
         """קובע תזמון שבועי לשעה ספציפית ומבטל תזמונים קודמים."""
