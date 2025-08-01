@@ -71,10 +71,10 @@ class TelegramSummaryBot:
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("generate_summary", self.generate_summary_command))
         self.application.add_handler(CommandHandler("preview", self.preview_command))
+        self.application.add_handler(CommandHandler("cancel_schedule", self.cancel_schedule_command))
+        self.application.add_handler(CommandHandler("show_schedule", self.show_schedule_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
         self.application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, self.handle_new_channel_post))
-        
-        # --- הוסף את השורה הבאה ---
         self.application.add_handler(MessageHandler(filters.FORWARDED & ~filters.COMMAND, self.handle_forwarded_post))
     
     async def handle_new_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -159,8 +159,10 @@ class TelegramSummaryBot:
 פקודות זמינות:
 📊 /generate_summary - יצירת סיכום ידני
 👀 /preview - תצוגה מקדימה של הסיכום האחרון
+📋 /show_schedule - הצגת סטטוס התזמון האוטומטי
+❌ /cancel_schedule - ביטול התזמון האוטומטי
 
-הבוט פועל אוטומטית כל שישי ב-16:00
+הבוט פועל אוטומטית כל שישי ב-16:00 (שעון ישראל)
         """
         await update.message.reply_text(welcome_message)
     
@@ -379,21 +381,54 @@ class TelegramSummaryBot:
                 text=f"שגיאה ביצירת הסיכום האוטומטי: {str(e)}"
             )
     
+    async def cancel_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """פקודה לביטול התזמון האוטומטי"""
+        if str(update.effective_user.id) != self.admin_chat_id:
+            await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
+            return
+            
+        schedule.clear('weekly-summary')
+        logger.info("Weekly summary schedule has been cancelled by the admin.")
+        await update.message.reply_text("✅ התזמון האוטומטי לסיכום השבועי בוטל.")
+
+    async def show_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """פקודה להצגת סטטוס התזמון"""
+        if str(update.effective_user.id) != self.admin_chat_id:
+            await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
+            return
+            
+        jobs = schedule.get_jobs('weekly-summary')
+        if jobs:
+            await update.message.reply_text(f"📊 קיים תזמון אוטומטי פעיל.\nפרטים: {jobs[0]}")
+        else:
+            await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
+    
     def schedule_weekly_summary(self):
-        """תזמון הסיכום השבועי"""
-        schedule.every().friday.at("16:00").do(
-            lambda: asyncio.create_task(self.scheduled_summary())
-        )
+        """תזמון הסיכום השבועי לשעה 16:00 שעון ישראל"""
+        # ניקוי תזמונים קודמים כדי למנוע כפילויות
+        schedule.clear('weekly-summary')
+        
+        # יצירת תזמון חדש עם תג ואזור זמן
+        schedule.every().friday.at("16:00", self.israel_tz).do(
+            lambda: asyncio.run_coroutine_threadsafe(self.scheduled_summary(), self.application.loop)
+        ).tag('weekly-summary')
+        
+        logger.info("Weekly summary scheduled for Friday at 16:00 (Israel Time).")
         
     def run_scheduler(self):
-        """הרצת הtimer ברקע"""
+        """הרצת ה-scheduler ברקע"""
+        # שמירת לולאת האירועים של ה-thread הראשי
+        self.application.loop = asyncio.get_event_loop()
         while True:
             schedule.run_pending()
-            time.sleep(60)  # בדיקה כל דקה
+            time.sleep(1) # בדיקה כל שנייה
     
     async def run(self):
         """הרצת הבוט"""
         try:
+            # הגדרת התזמון השבועי
+            self.schedule_weekly_summary()
+            
             # התחלת תזמון ברקע
             scheduler_thread = Thread(target=self.run_scheduler, daemon=True)
             scheduler_thread.start()
