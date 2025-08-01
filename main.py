@@ -295,7 +295,7 @@ class TelegramSummaryBot:
                     {"role": "system", "content": "אתה מומחה לטכנולוגיה ו-AI שכותב סיכומים שבועיים בעברית לערוץ טלגרם."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=2000,  # הגדלת מגבלת התווים מ-1000 ל-2000
+                max_tokens=5000,  # הגדלת מגבלת התווים ל-5000 עבור סיכומים מפורטים יותר
                 temperature=0.7
             )
             
