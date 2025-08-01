@@ -326,15 +326,12 @@ def start_bot_logic():
     asyncio.run(main())
 
 # =================================================================
-# הפעלת הבוט בתהליך רקע והשארת התהליך הראשי ל-Flask
+# הפעלת הבוט בתהליך רקע ברמה הגלובלית של המודול
+# כך ש-Gunicorn יפעיל אותו בעת הייבוא.
 # =================================================================
-if __name__ == '__main__':
-    logging.info("Creating bot thread...")
-    bot_thread = threading.Thread(target=start_bot_logic)
-    bot_thread.daemon = True
-    bot_thread.start()
-    
-    logging.info("Starting Flask server for Render health checks...")
-    # לתשומת לבך: אין צורך להוסיף app.run() כאן.
-    # Gunicorn יריץ את האובייקט 'app' בעצמו.
-    # אנחנו משאירים את הבלוק הזה ריק בכוונה אחרי התחלת ה-thread.
+logging.info("Creating bot thread to run in the background...")
+bot_thread = threading.Thread(target=start_bot_logic)
+bot_thread.daemon = True
+bot_thread.start()
+
+logging.info("Background bot thread started. The main thread will now be managed by Gunicorn.")
