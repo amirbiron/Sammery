@@ -428,7 +428,7 @@ class TelegramSummaryBot:
         )
 
     async def show_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """פקודה להצגת סטטוס התזמון בצורה ידידותית."""
+        """פקודה להצגת סטטוס התזמון בצורה ידידותית ומאובטחת."""
         if str(update.effective_user.id) != self.admin_chat_id:
             await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
             return
@@ -436,16 +436,35 @@ class TelegramSummaryBot:
         jobs = schedule.get_jobs('weekly-summary')
         if jobs:
             job = jobs[0]
+            
             # בניית הודעה ברורה יותר
-            time_info = job.at_time if job.at_time else "כל יום"
-            day_info = job.start_day if job.unit == 'weeks' else ""
+            time_info = job.at_time if job.at_time else "לא צוינה שעה"
+            day_info = "יום שישי"  # אנחנו יודעים מהלוגיקה שזה תמיד יום שישי
             
-            friendly_text = f"📊 קיים תזמון אוטומטי פעיל.\n\n"
-            friendly_text += f"🔹 **תדירות:** כל שבוע\n"
-            friendly_text += f"🔹 **יום:** {day_info.capitalize()}\n"
-            friendly_text += f"🔹 **שעה (שעון ישראל):** {time_info}\n"
-            friendly_text += f"🔹 **הרצה הבאה בעוד:** {job.next_run - datetime.now(self.israel_tz)}"
+            friendly_text = f"📊 <b>קיים תזמון אוטומטי פעיל</b>\n\n"
+            friendly_text += f"🔹 <b>תדירות:</b> כל שבוע\n"
+            friendly_text += f"🔹 <b>יום:</b> {day_info}\n"
+            friendly_text += f"🔹 <b>שעה (שעון ישראל):</b> {time_info}\n\n"
             
+            # חישוב זמן מאובטח מפני שגיאות timezone
+            try:
+                now_israel = datetime.now(self.israel_tz)
+                next_run_time = job.next_run
+                
+                # אם התזמון הוא "נאיבי" (ללא אזור זמן), נתייחס אליו כ-UTC ונמיר
+                if next_run_time.tzinfo is None:
+                    next_run_time = pytz.utc.localize(next_run_time).astimezone(self.israel_tz)
+
+                time_until = next_run_time - now_israel
+                
+                # הסרת מיקרו-שניות מהתצוגה לפלט נקי
+                time_until_str = str(timedelta(seconds=int(time_until.total_seconds())))
+                
+                friendly_text += f"⏳ <b>הרצה הבאה בעוד:</b> {time_until_str}"
+            except Exception as e:
+                logger.error(f"Could not calculate next run time in show_schedule: {e}")
+                friendly_text += "לא ניתן היה לחשב את זמן הריצה הבאה."
+
             await update.message.reply_text(friendly_text, parse_mode=ParseMode.HTML)
         else:
             await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
