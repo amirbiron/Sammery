@@ -42,8 +42,10 @@ class TelegramSummaryBot:
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')
         
-        # אתחול OpenAI
-        openai.api_key = self.openai_api_key
+        if not self.openai_api_key:
+            raise ValueError("OPENAI_API_KEY environment variable not set!")
+        # אתחול לקוח OpenAI החדש
+        self.openai_client = openai.OpenAI(api_key=self.openai_api_key)
         
         # אתחול הבוט
         self.application = Application.builder().token(self.bot_token).build()
@@ -185,50 +187,55 @@ class TelegramSummaryBot:
             return []
     
     async def create_summary_with_gpt4(self, posts: List[Dict]) -> str:
-        """יצירת סיכום עם GPT-4"""
+        """יצירת סיכום עם GPT-4 באמצעות התחביר החדש של OpenAI"""
         if not posts:
-            return "לא נמצאו פוסטים השבוע"
+            return "לא נמצאו פוסטים רלוונטיים לסיכום."
         
         # הכנת הטקסט לסיכום
-        posts_text = "\n\n".join([f"תאריך: {post['date']}\nתוכן: {post['text']}" for post in posts])
+        posts_text = "\n\n".join([f"תאריך: {post['date'].strftime('%Y-%m-%d')}\nתוכן: {post['text']}" for post in posts])
         
         prompt = f"""
-אתה מסכם תוכן טכנולוגי בעברית. צור סיכום שבועי מעניין ומקצועי של הפוסטים הבאים מערוץ AndroidAndAI.
+אתה מומחה לטכנולוגיה ו-AI ועורך תוכן בעברית. צור סיכום שבועי מעניין ומקצועי של הפוסטים הבאים מערוץ AndroidAndAI.
 
 הפורמט הרצוי:
 אז מה היה לנו השבוע? 🔥
 
-[סיכום מעניין ומקצועי בעברית של העדכונים הטכנולוגיים, חדשות Android ו-AI]
+[כאן יבוא סיכום מעניין, קולח ומקצועי בעברית של העדכונים הטכנולוגיים, חדשות Android ו-AI שהופיעו בפוסטים]
 
 מוזמנים לעקוב גם בשבוע הבא 🙌
 
-הפוסטים לסיכום:
+להלן הפוסטים שיש לסכם:
 {posts_text}
 
-דרישות:
-- כתיבה בעברית בלבד
-- סגנון מעניין ומקצועי
-- התמקדות בנושאים החשובים ביותר
-- שימוש באמוג'י בצורה מתונה
-- אורך של 200-400 מילים
+דרישות חשובות:
+- כתיבה בעברית רהוטה ומקצועית בלבד.
+- סגנון קליל ומעניין, לא רשימת מכולת.
+- התמקדות בנושאים החשובים ביותר שעלו.
+- שימוש באמוג'י בצורה מתונה כדי להוסיף צבע.
+- אורך הסיכום יהיה בין 200 ל-400 מילים.
 """
         
         try:
-            response = openai.ChatCompletion.create(
-                model="gpt-4-turbo-preview",
+            logger.info("Sending request to OpenAI API...")
+            # שימוש בתחביר החדש
+            response = self.openai_client.chat.completions.create(
+                model="gpt-4-turbo",  # שימוש במודל המעודכן
                 messages=[
-                    {"role": "system", "content": "אתה מומחה לטכנולוגיה ו-AI שכותב סיכומים בעברית"},
+                    {"role": "system", "content": "אתה מומחה לטכנולוגיה ו-AI שכותב סיכומים שבועיים בעברית לערוץ טלגרם."},
                     {"role": "user", "content": prompt}
                 ],
                 max_tokens=1000,
                 temperature=0.7
             )
             
-            return response.choices[0].message.content.strip()
+            summary = response.choices[0].message.content.strip()
+            logger.info("Successfully received summary from OpenAI.")
+            return summary
             
         except Exception as e:
-            logger.error(f"שגיאה ב-GPT-4: {e}")
-            return f"שגיאה ביצירת הסיכום: {str(e)}"
+            logger.error(f"Error creating summary with OpenAI: {e}", exc_info=True)
+            # החזרת הודעת השגיאה המקורית כדי שנדע מה קרה
+            return f"שגיאה ביצירת הסיכום: \n\n{e}"
     
     async def generate_summary_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודה ליצירת סיכום ידני"""
