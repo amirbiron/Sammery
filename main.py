@@ -462,12 +462,11 @@ class TelegramSummaryBot:
     async def publish_summary(self) -> bool:
         """
         פרסום הסיכום לערוץ.
-        שולח תמונת כותרת (אם קיימת) והודעת טקסט בנפרד כדי למנוע בעיות מגבלה,
-        ומנקה את מאגר הפוסטים לאחר הצלחה.
+        שולח תמונת כותרת והודעת טקסט בנפרד, מנקה את המאגר,
+        ומתזמן מחדש את הריצה הבאה כדי למנוע כפילויות.
         """
         if not self.pending_summary:
             logger.warning("publish_summary called but there is no pending summary.")
-            # נודיע לאדמין שהייתה לחיצה אבל אין מה לפרסם
             await self.application.bot.send_message(
                 chat_id=self.admin_chat_id,
                 text="ניסית לפרסם, אבל לא היה סיכום בהמתנה."
@@ -475,7 +474,7 @@ class TelegramSummaryBot:
             return False
 
         try:
-            # שלב 1: שליחת תמונת כותרת (אם הוגדרה במשתני הסביבה)
+            # שלב 1: שליחת תמונת כותרת (הקוד הקיים שלך)
             image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
             if image_file_id:
                 logger.info("Found SUMMARY_IMAGE_FILE_ID. Sending header image...")
@@ -483,10 +482,8 @@ class TelegramSummaryBot:
                     chat_id=f"@{self.channel_username}",
                     photo=image_file_id
                 )
-            else:
-                logger.info("SUMMARY_IMAGE_FILE_ID not set. Skipping header image.")
 
-            # שלב 2: שליחת טקסט הסיכום בהודעה נפרדת (מגבלת 4096 תווים)
+            # שלב 2: שליחת טקסט הסיכום (הקוד הקיים שלך)
             logger.info("Sending summary text to the channel...")
             await self.application.bot.send_message(
                 chat_id=f"@{self.channel_username}",
@@ -494,16 +491,25 @@ class TelegramSummaryBot:
                 parse_mode=ParseMode.HTML
             )
 
-            # שלב 3: ניקוי הפוסטים מהמאגר לאחר פרסום מוצלח
+            # שלב 3: ניקוי הפוסטים מהמאגר (הקוד הקיים שלך)
             logger.info("Summary published successfully. Clearing posts from the database...")
             delete_result = self.posts_collection.delete_many({})
             logger.info(f"Cleared {delete_result.deleted_count} posts from the collection.")
-            
+
+            # --- תוספת קריטית: איפוס ותזמון מחדש ---
+            jobs = schedule.get_jobs('weekly-summary')
+            if jobs:
+                run_time_str = jobs[0].at_time.strftime('%H:%M')
+                schedule.clear('weekly-summary')
+                schedule.every().friday.at(run_time_str, self.israel_tz).do(
+                    lambda: asyncio.run_coroutine_threadsafe(self.scheduled_summary(), self.application.loop)
+                ).tag('weekly-summary')
+                logger.info(f"Successfully published. Rescheduled next run for next Friday at {run_time_str}.")
+
             return True
 
         except Exception as e:
             logger.error(f"Failed to publish summary: {e}", exc_info=True)
-            # שלח הודעת שגיאה מפורטת לאדמין
             await self.application.bot.send_message(
                 chat_id=self.admin_chat_id,
                 text=f"❌ נכשלתי בפרסום הסיכום לערוץ.\n<b>שגיאה:</b>\n<pre>{e}</pre>",
@@ -696,7 +702,7 @@ class TelegramSummaryBot:
             status_text = "🟢 מופעל"
             message = (
                 f"<b>מצב פרסום אוטומטי: {status_text}</b>\n\n"
-                "הסיכום המתוזמן הבא יפורסם ישירות לערוץ ללא אישור.\n"
+                "הסיכום המתוזמן הבא יפורסם ישירות לערוץ ללא אישור ידני.\n"
                 "המצב יתכבה אוטומטית לאחר הפרסום.\n\n"
                 "כדי לבטל, פשוט שלח את הפקודה /toggle_autopublish שוב."
             )
