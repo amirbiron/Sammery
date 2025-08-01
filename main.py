@@ -37,10 +37,16 @@ def health_check():
 
 # הגדרת לוגים
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(threadName)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO  # הרמה הכללית נשארת INFO כדי לראות את הלוגים שלנו
 )
-# שורה זו יוצרת לוגר ייעודי לקובץ שלנו, שיראה את שם הקובץ בלוגים
+
+# --- השתקת ספריות חיצוניות רועשות ---
+# מעלים את רמת הלוג עבור הספריות הספציפיות האלה ל-WARNING.
+# כך, נראה מהן רק אזהרות ושגיאות, ולא את הודעות ה-INFO של ה-polling.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 class TelegramSummaryBot:
