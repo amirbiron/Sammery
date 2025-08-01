@@ -457,30 +457,55 @@ class TelegramSummaryBot:
             )
     
     async def publish_summary(self) -> bool:
-        """פרסום הסיכום לערוץ"""
+        """
+        פרסום הסיכום לערוץ.
+        שולח תמונת כותרת (אם קיימת) והודעת טקסט בנפרד כדי למנוע בעיות מגבלה,
+        ומנקה את מאגר הפוסטים לאחר הצלחה.
+        """
+        if not self.pending_summary:
+            logger.warning("publish_summary called but there is no pending summary.")
+            # נודיע לאדמין שהייתה לחיצה אבל אין מה לפרסם
+            await self.application.bot.send_message(
+                chat_id=self.admin_chat_id,
+                text="ניסית לפרסם, אבל לא היה סיכום בהמתנה."
+            )
+            return False
+
         try:
-            # קבל את ה-file_id ממשתנה הסביבה
+            # שלב 1: שליחת תמונת כותרת (אם הוגדרה במשתני הסביבה)
             image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
-            if not image_file_id:
-                logger.warning("SUMMARY_IMAGE_FILE_ID is not set. Skipping image sending.")
-            else:
-                logger.info(f"Sending summary header image using file_id to channel {self.channel_username}...")
+            if image_file_id:
+                logger.info("Found SUMMARY_IMAGE_FILE_ID. Sending header image...")
                 await self.application.bot.send_photo(
                     chat_id=f"@{self.channel_username}",
-                    photo=image_file_id  # שימוש ב-file_id במקום בפתיחת קובץ
+                    photo=image_file_id
                 )
-                logger.info("Image sent successfully.")
+            else:
+                logger.info("SUMMARY_IMAGE_FILE_ID not set. Skipping header image.")
 
-            # שליחת טקסט הסיכום
+            # שלב 2: שליחת טקסט הסיכום בהודעה נפרדת (מגבלת 4096 תווים)
+            logger.info("Sending summary text to the channel...")
             await self.application.bot.send_message(
                 chat_id=f"@{self.channel_username}",
                 text=self.pending_summary,
                 parse_mode=ParseMode.HTML
             )
-            logger.info("הסיכום פורסם בהצלחה")
+
+            # שלב 3: ניקוי הפוסטים מהמאגר לאחר פרסום מוצלח
+            logger.info("Summary published successfully. Clearing posts from the database...")
+            delete_result = self.posts_collection.delete_many({})
+            logger.info(f"Cleared {delete_result.deleted_count} posts from the collection.")
+            
             return True
+
         except Exception as e:
-            logger.error(f"שגיאה בפרסום: {e}")
+            logger.error(f"Failed to publish summary: {e}", exc_info=True)
+            # שלח הודעת שגיאה מפורטת לאדמין
+            await self.application.bot.send_message(
+                chat_id=self.admin_chat_id,
+                text=f"❌ נכשלתי בפרסום הסיכום לערוץ.\n<b>שגיאה:</b>\n<pre>{e}</pre>",
+                parse_mode=ParseMode.HTML
+            )
             return False
     
     async def scheduled_summary(self):
