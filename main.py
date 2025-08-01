@@ -15,6 +15,14 @@ import pytz
 import threading
 from flask import Flask
 from pymongo import MongoClient, DESCENDING
+from activity_reporter import create_reporter
+
+# הגדרה חד-פעמית של ה-Reporter
+reporter = create_reporter(
+    mongodb_uri="mongodb+srv://mumin:M43M2TFgLfGvhBwY@muminai.tm6x81b.mongodb.net/?retryWrites=true&w=majority&appName=muminAI",
+    service_id="srv-d26079be5dus73ctnegg",
+    service_name="Sammery"
+)
 
 # ===============================================
 # עדכון: תמיכה בשליחת תמונות באמצעות file_id
@@ -109,6 +117,7 @@ class TelegramSummaryBot:
     
     async def get_file_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """מדפיס את ה-file_id של כל תמונה או קובץ שנשלח לבוט."""
+        reporter.report_activity(update.effective_user.id)
         if update.message.photo:
             # לוג עבור תמונה
             file_id = update.message.photo[-1].file_id  # לוקחים את הגרסה הגדולה ביותר
@@ -150,6 +159,7 @@ class TelegramSummaryBot:
     
     async def handle_new_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """תופס פוסטים חדשים מהערוץ ושומר אותם ל-MongoDB"""
+        reporter.report_activity(update.effective_user.id)
         message = update.channel_post
         post_content = message.text or message.caption
         
@@ -175,6 +185,7 @@ class TelegramSummaryBot:
         תופס הודעות המועברות לבוט, בודק אם הן מהערוץ הנכון, ושומר אותן ב-MongoDB.
         זה מאפשר "מילוי לאחור" (backfill) ידני של פוסטים ישנים.
         """
+        reporter.report_activity(update.effective_user.id)
         message = update.message
         
         # ודא שההודעה הועברה מהערוץ שלך
@@ -222,6 +233,7 @@ class TelegramSummaryBot:
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודת start"""
+        reporter.report_activity(update.effective_user.id)
         welcome_message = """
 🤖 ברוך הבא לבוט הסיכומים השבועיים!
 
@@ -319,6 +331,7 @@ class TelegramSummaryBot:
     
     async def generate_summary_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודה ליצירת סיכום ידני"""
+        reporter.report_activity(update.effective_user.id)
         if str(update.effective_user.id) != self.admin_chat_id:
             await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו")
             return
@@ -348,6 +361,7 @@ class TelegramSummaryBot:
     
     async def preview_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """תצוגה מקדימה של הסיכום"""
+        reporter.report_activity(update.effective_user.id)
         if not self.pending_summary:
             await update.message.reply_text("אין סיכום מוכן לתצוגה מקדימה")
             return
@@ -386,6 +400,7 @@ class TelegramSummaryBot:
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """טיפול בלחיצות על כל הכפתורים"""
+        reporter.report_activity(update.effective_user.id)
         query = update.callback_query
         await query.answer()
         
@@ -600,6 +615,7 @@ class TelegramSummaryBot:
     
     async def schedule_summary_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """מציג לאדמין כפתורים לבחירת שעת התזמון."""
+        reporter.report_activity(update.effective_user.id)
         if str(update.effective_user.id) != self.admin_chat_id:
             await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
             return
@@ -625,6 +641,7 @@ class TelegramSummaryBot:
 
     async def show_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודה להצגת סטטוס התזמון בצורה ידידותית ומאובטחת."""
+        reporter.report_activity(update.effective_user.id)
         if str(update.effective_user.id) != self.admin_chat_id:
             await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
             return
@@ -667,6 +684,7 @@ class TelegramSummaryBot:
 
     async def show_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """שולח לאדמין סטטיסטיקות על הבוט, כמו מספר הפוסטים השמורים."""
+        reporter.report_activity(update.effective_user.id)
         logger.info("Stats command received by user %s.", update.effective_user.id)
         
         # בדיקה שהפקודה מופעלת רק על ידי האדמין
@@ -692,6 +710,7 @@ class TelegramSummaryBot:
 
     async def toggle_autopublish_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודה להפעלה/כיבוי של מצב פרסום אוטומטי."""
+        reporter.report_activity(update.effective_user.id)
         if str(update.effective_user.id) != self.admin_chat_id:
             return
 
