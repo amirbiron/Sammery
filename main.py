@@ -85,7 +85,7 @@ class TelegramSummaryBot:
             
             # קריאת הודעות מהערוץ
             async for message in self.bot.iter_history(f"@{self.channel_username}", limit=100):
-                if message.date.replace(tzinfo=pytz.UTC).astimezone(self.israel_tz) < since_date:
+                if message.date.astimezone(self.israel_tz) < since_date:
                     break
                 
                 if message.text:
