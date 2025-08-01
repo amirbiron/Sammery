@@ -50,6 +50,7 @@ class TelegramSummaryBot:
         self.channel_username = os.getenv('CHANNEL_USERNAME', 'AndroidAndAI')
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')
+        self.admin_id = self.admin_chat_id  # הוספת משתנה נוסף עבור error_handler
         
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set!")
@@ -101,12 +102,36 @@ class TelegramSummaryBot:
             # לוג עבור תמונה
             file_id = update.message.photo[-1].file_id  # לוקחים את הגרסה הגדולה ביותר
             logger.info(f"Received Photo. file_id: {file_id}")
-            await update.message.reply_text(f"קיבלתי תמונה.\nה-file_id שלה הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
+            await update.message.reply_text(f"קיבלתי תמונה\\.\nה-file_id שלה הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
         elif update.message.document:
             # לוג עבור קובץ כללי
             file_id = update.message.document.file_id
             logger.info(f"Received Document. file_id: {file_id}")
-            await update.message.reply_text(f"קיבלתי קובץ.\nה-file_id שלו הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
+            await update.message.reply_text(f"קיבלתי קובץ\\.\nה-file_id שלו הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
+    
+    async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """רושם שגיאות ושולח הודעת טלגרם לאדמין כאשר מתרחשת שגיאה."""
+        logger.error("Exception while handling an update:", exc_info=context.error)
+
+        # הרכבת הודעת השגיאה לאדמין
+        error_message = (
+            f"🚨 התרחשה שגיאה בבוט 🚨\n\n"
+            f"סוג השגיאה: {type(context.error).__name__}\n"
+            f"הודעת השגיאה: {context.error}\n"
+        )
+
+        try:
+            # שליחת ההודעה לאדמין
+            if self.admin_id:
+                await self.application.bot.send_message(
+                    chat_id=self.admin_id,
+                    text=error_message
+                )
+                logger.info(f"Error notification sent to admin ({self.admin_id}).")
+            else:
+                logger.warning("Admin ID not set, cannot send error notification.")
+        except Exception as e:
+            logger.error(f"Failed to send error notification to admin: {e}")
     
     async def handle_new_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """תופס פוסטים חדשים מהערוץ ושומר אותם ל-MongoDB"""
@@ -653,6 +678,9 @@ class TelegramSummaryBot:
     async def run(self):
         """הרצת הבוט"""
         try:
+            # הוספת מנהל השגיאות הגלובלי
+            self.application.add_error_handler(self.error_handler)
+            
             # התחלת תזמון ברקע
             scheduler_thread = Thread(target=self.run_scheduler, name="SchedulerThread")
             scheduler_thread.daemon = True
