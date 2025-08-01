@@ -78,27 +78,46 @@ class TelegramSummaryBot:
         await update.message.reply_text(welcome_message)
     
     async def get_channel_posts(self, days_back: int = 7) -> List[Dict]:
-        """קריאת פוסטים מהערוץ מהימים האחרונים"""
+        """קריאת פוסטים מהערוץ מהימים האחרונים עם לוגים מפורטים"""
+        logger.info("--- Starting get_channel_posts ---")
         try:
             posts = []
             since_date = datetime.now(self.israel_tz) - timedelta(days=days_back)
-            
-            # קריאת הודעות מהערוץ
-            async for message in self.bot.iter_history(f"@{self.channel_username}", limit=100):
-                if message.date.astimezone(self.israel_tz) < since_date:
+            logger.info(f"Searching for posts since (Israel Time): {since_date.strftime('%Y-%m-%d %H:%M:%S')}")
+
+            message_count = 0
+            # הגדלתי את המגבלה ל-200 כדי להבטיח סריקה מספקת
+            async for message in self.bot.iter_history(f"@{self.channel_username}", limit=200):
+                message_count += 1
+                message_date_israel = message.date.astimezone(self.israel_tz)
+
+                logger.info(f"--- Checking message {message.message_id} ({message_count}) ---")
+                logger.info(f"  Message Date (UTC):    {message.date.strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info(f"  Message Date (Israel): {message_date_israel.strftime('%Y-%m-%d %H:%M:%S')}")
+
+                # בדיקת תנאי העצירה
+                if message_date_israel < since_date:
+                    logger.warning(f"  Message is older than since_date. Breaking loop.")
                     break
                 
-                if message.text:
+                # בדיקת תוכן ההודעה
+                post_content = message.text or message.caption
+                if post_content:
+                    logger.info(f"  Found content. Appending post.")
                     posts.append({
                         'date': message.date.strftime('%Y-%m-%d %H:%M'),
-                        'text': message.text,
+                        'text': post_content,
                         'message_id': message.message_id
                     })
-            
+                else:
+                    logger.info(f"  No text or caption found for this message. Skipping.")
+
+            logger.info(f"--- Finished get_channel_posts ---")
+            logger.info(f"Checked a total of {message_count} messages. Found {len(posts)} posts with content.")
             return posts[::-1]  # סדר כרונולוגי
             
         except Exception as e:
-            logger.error(f"שגיאה בקריאת פוסטים: {e}")
+            logger.error(f"FATAL ERROR in get_channel_posts: {e}", exc_info=True)
             return []
     
     async def create_summary_with_gpt4(self, posts: List[Dict]) -> str:
