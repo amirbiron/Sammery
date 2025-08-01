@@ -71,9 +71,14 @@ class TelegramSummaryBot:
         self.application.add_handler(CommandHandler("start", self.start_command))
         self.application.add_handler(CommandHandler("generate_summary", self.generate_summary_command))
         self.application.add_handler(CommandHandler("preview", self.preview_command))
-        self.application.add_handler(CommandHandler("cancel_schedule", self.cancel_schedule_command))
-        self.application.add_handler(CommandHandler("show_schedule", self.show_schedule_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
+
+        # --- פקודות ניהול חדשות ---
+        self.application.add_handler(CommandHandler("schedule_summary", self.schedule_summary_command))
+        self.application.add_handler(CommandHandler("show_schedule", self.show_schedule_command))
+        # שים לב: הפקודה cancel_schedule_command הוסרה כי היא מטופלת עכשיו בכפתור.
+
+        # --- Handlers לקליטת פוסטים ---
         self.application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, self.handle_new_channel_post))
         self.application.add_handler(MessageHandler(filters.FORWARDED & ~filters.COMMAND, self.handle_forwarded_post))
     
@@ -159,10 +164,10 @@ class TelegramSummaryBot:
 פקודות זמינות:
 📊 /generate_summary - יצירת סיכום ידני
 👀 /preview - תצוגה מקדימה של הסיכום האחרון
+⏰ /schedule_summary - הגדרת תזמון אוטומטי (בחירת שעה)
 📋 /show_schedule - הצגת סטטוס התזמון האוטומטי
-❌ /cancel_schedule - ביטול התזמון האוטומטי
 
-הבוט פועל אוטומטית כל שישי ב-16:00 (שעון ישראל)
+השתמש ב-/schedule_summary כדי לבחור שעת שליחה אוטומטית ביום שישי
         """
         await update.message.reply_text(welcome_message)
     
@@ -293,10 +298,26 @@ class TelegramSummaryBot:
         )
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """טיפול בלחיצות על כפתורים"""
+        """טיפול בלחיצות על כל הכפתורים"""
         query = update.callback_query
         await query.answer()
         
+        data = query.data
+
+        if data.startswith("schedule_set:"):
+            hour = data.split(":")[1]
+            time_str = f"{hour}:00"
+            self.set_weekly_schedule(time_str)
+            await query.edit_message_text(f"✅ הסיכום תזומן בהצלחה ליום שישי בשעה {time_str} (שעון ישראל).")
+            return
+
+        if data == "schedule_cancel_existing":
+            schedule.clear('weekly-summary')
+            logger.info("Weekly summary schedule has been cancelled by the admin via button.")
+            await query.edit_message_text("✅ התזמון האוטומטי בוטל.")
+            return
+
+        # --- לוגיקה קיימת לסיכומים ---
         if query.data == "preview":
             if self.pending_summary:
                 await query.message.reply_text(
@@ -381,15 +402,30 @@ class TelegramSummaryBot:
                 text=f"שגיאה ביצירת הסיכום האוטומטי: {str(e)}"
             )
     
-    async def cancel_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """פקודה לביטול התזמון האוטומטי"""
+    async def schedule_summary_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """מציג לאדמין כפתורים לבחירת שעת התזמון."""
         if str(update.effective_user.id) != self.admin_chat_id:
             await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
             return
-            
-        schedule.clear('weekly-summary')
-        logger.info("Weekly summary schedule has been cancelled by the admin.")
-        await update.message.reply_text("✅ התזמון האוטומטי לסיכום השבועי בוטל.")
+
+        keyboard = [
+            [
+                InlineKeyboardButton("14:00", callback_data="schedule_set:14"),
+                InlineKeyboardButton("15:00", callback_data="schedule_set:15"),
+                InlineKeyboardButton("16:00", callback_data="schedule_set:16"),
+            ],
+            [
+                InlineKeyboardButton("17:00", callback_data="schedule_set:17"),
+                InlineKeyboardButton("18:00", callback_data="schedule_set:18"),
+                InlineKeyboardButton("19:00", callback_data="schedule_set:19"),
+            ],
+            [InlineKeyboardButton("❌ בטל תזמון קיים", callback_data="schedule_cancel_existing")],
+        ]
+        
+        await update.message.reply_text(
+            "אנא בחר שעת שליחה לסיכום האוטומטי ביום שישי:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     async def show_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודה להצגת סטטוס התזמון"""
@@ -403,17 +439,17 @@ class TelegramSummaryBot:
         else:
             await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
     
-    def schedule_weekly_summary(self):
-        """תזמון הסיכום השבועי לשעה 16:00 שעון ישראל"""
-        # ניקוי תזמונים קודמים כדי למנוע כפילויות
+    def set_weekly_schedule(self, time_str: str):
+        """קובע תזמון שבועי לשעה ספציפית ומבטל תזמונים קודמים."""
+        # ניקוי תזמונים קודמים עם אותו תג
         schedule.clear('weekly-summary')
         
-        # יצירת תזמון חדש עם תג ואזור זמן
-        schedule.every().friday.at("16:00", self.israel_tz).do(
+        # קביעת התזמון החדש עם תג, שעה ואזור זמן
+        schedule.every().friday.at(time_str, self.israel_tz).do(
             lambda: asyncio.run_coroutine_threadsafe(self.scheduled_summary(), self.application.loop)
         ).tag('weekly-summary')
         
-        logger.info("Weekly summary scheduled for Friday at 16:00 (Israel Time).")
+        logger.info(f"Weekly summary has been set for Friday at {time_str} (Israel Time).")
         
     def run_scheduler(self):
         """הרצת ה-scheduler ברקע"""
@@ -426,9 +462,6 @@ class TelegramSummaryBot:
     async def run(self):
         """הרצת הבוט"""
         try:
-            # הגדרת התזמון השבועי
-            self.schedule_weekly_summary()
-            
             # התחלת תזמון ברקע
             scheduler_thread = Thread(target=self.run_scheduler, daemon=True)
             scheduler_thread.start()
