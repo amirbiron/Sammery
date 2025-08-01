@@ -428,14 +428,25 @@ class TelegramSummaryBot:
         )
 
     async def show_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """פקודה להצגת סטטוס התזמון"""
+        """פקודה להצגת סטטוס התזמון בצורה ידידותית."""
         if str(update.effective_user.id) != self.admin_chat_id:
             await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
             return
             
         jobs = schedule.get_jobs('weekly-summary')
         if jobs:
-            await update.message.reply_text(f"📊 קיים תזמון אוטומטי פעיל.\nפרטים: {jobs[0]}")
+            job = jobs[0]
+            # בניית הודעה ברורה יותר
+            time_info = job.at_time if job.at_time else "כל יום"
+            day_info = job.start_day if job.unit == 'weeks' else ""
+            
+            friendly_text = f"📊 קיים תזמון אוטומטי פעיל.\n\n"
+            friendly_text += f"🔹 **תדירות:** כל שבוע\n"
+            friendly_text += f"🔹 **יום:** {day_info.capitalize()}\n"
+            friendly_text += f"🔹 **שעה (שעון ישראל):** {time_info}\n"
+            friendly_text += f"🔹 **הרצה הבאה בעוד:** {job.next_run - datetime.now(self.israel_tz)}"
+            
+            await update.message.reply_text(friendly_text, parse_mode=ParseMode.HTML)
         else:
             await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
     
