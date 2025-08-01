@@ -14,6 +14,7 @@ from threading import Thread
 import pytz
 import threading
 from flask import Flask
+from pymongo import MongoClient, DESCENDING
 
 # ===============================================
 # שרת אינטרנט מינימלי עבור Render
@@ -37,15 +38,24 @@ class TelegramSummaryBot:
     def __init__(self):
         # משתני סביבה
         self.bot_token = os.getenv('TELEGRAM_BOT_TOKEN')
-        self.channel_username = os.getenv('CHANNEL_USERNAME', 'AndroidAndAI')  # ללא @
+        self.channel_username = os.getenv('CHANNEL_USERNAME', 'AndroidAndAI')
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
-        self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')  # Chat ID של האדמין
+        self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')
         
         # אתחול OpenAI
         openai.api_key = self.openai_api_key
         
         # אתחול הבוט
         self.application = Application.builder().token(self.bot_token).build()
+        
+        # אתחול MongoDB
+        mongo_uri = os.getenv('MONGODB_URI')
+        if not mongo_uri:
+            raise ValueError("MONGODB_URI environment variable not set!")
+        self.mongo_client = MongoClient(mongo_uri)
+        self.db = self.mongo_client.telegram_bot_db
+        self.posts_collection = self.db.posts
+        logger.info("Successfully connected to MongoDB.")
         
         # משתני מצב
         self.pending_summary = None
@@ -60,6 +70,28 @@ class TelegramSummaryBot:
         self.application.add_handler(CommandHandler("generate_summary", self.generate_summary_command))
         self.application.add_handler(CommandHandler("preview", self.preview_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
+    
+    async def handle_new_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """תופס פוסטים חדשים מהערוץ ושומר אותם ל-MongoDB"""
+        message = update.channel_post
+        post_content = message.text or message.caption
+        
+        if not post_content:
+            return
+
+        logger.info(f"New post {message.message_id} detected in channel. Saving to MongoDB.")
+        
+        new_post = {
+            'message_id': message.message_id,
+            'date': message.date,  # שמירת התאריך כאובייקט Datetime של Python
+            'text': post_content
+        }
+        
+        try:
+            self.posts_collection.insert_one(new_post)
+            logger.info("Post saved successfully.")
+        except Exception as e:
+            logger.error(f"Error saving new post to MongoDB: {e}", exc_info=True)
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודת start"""
@@ -77,48 +109,24 @@ class TelegramSummaryBot:
         await update.message.reply_text(welcome_message)
     
     async def get_channel_posts(self, days_back: int = 7) -> List[Dict]:
-        """קריאת פוסטים מהערוץ מהימים האחרונים באמצעות get_chat_history"""
-        logger.info("--- Starting get_channel_posts (Corrected Method) ---")
+        """קריאת פוסטים מהימים האחרונים מ-MongoDB"""
+        logger.info("--- Starting get_channel_posts (Reading from MongoDB) ---")
         try:
-            posts = []
-            since_date = datetime.now(self.israel_tz) - timedelta(days=days_back)
-            logger.info(f"Searching for posts since (Israel Time): {since_date.strftime('%Y-%m-%d %H:%M:%S')}")
+            since_date = datetime.now(pytz.UTC) - timedelta(days=days_back)
+            logger.info(f"Searching for posts since (UTC): {since_date.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            # שימוש בפונקציה הנכונה: get_chat_history
-            # היא מחזירה רשימה, לא גנרטור
-            messages = await self.application.bot.get_chat_history(
-                chat_id=f"@{self.channel_username}",
-                limit=200  # נסרוק עד 200 הודעות אחורה
-            )
-
-            logger.info(f"Retrieved {len(messages)} messages from history.")
-
-            for message in messages:
-                message_date_israel = message.date.astimezone(self.israel_tz)
-
-                # בדיקת תנאי העצירה - אם ההודעה ישנה מדי, נפסיק לעבד
-                if message_date_israel < since_date:
-                    logger.warning(f"Message {message.message_id} is older than since_date. Stopping processing.")
-                    break
-                
-                # בדיקת תוכן ההודעה (טקסט או כיתוב)
-                post_content = message.text or message.caption
-                if post_content:
-                    logger.info(f"Found content in message {message.message_id}. Appending post.")
-                    posts.append({
-                        'date': message.date.strftime('%Y-%m-%d %H:%M'),
-                        'text': post_content,
-                        'message_id': message.message_id
-                    })
-                else:
-                    logger.info(f"No text or caption found for message {message.message_id}. Skipping.")
-
-            logger.info(f"--- Finished get_channel_posts ---")
-            logger.info(f"Processed messages. Found {len(posts)} posts with content.")
-            return posts[::-1]  # סדר כרונולוגי (מהישן לחדש)
+            # בניית שאילתה ל-MongoDB
+            query = {'date': {'$gte': since_date}}
+            
+            # שליפת הפוסטים ומיון מהישן לחדש
+            posts_cursor = self.posts_collection.find(query).sort('date', 1)
+            
+            relevant_posts = list(posts_cursor)
+            
+            logger.info(f"Found {len(relevant_posts)} posts from the last {days_back} days in MongoDB.")
+            return relevant_posts
             
         except Exception as e:
-            # הוספתי פרמטר exc_info=True כדי לקבל את כל פרטי השגיאה בלוג
             logger.error(f"FATAL ERROR in get_channel_posts: {e}", exc_info=True)
             return []
     
