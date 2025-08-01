@@ -87,6 +87,7 @@ class TelegramSummaryBot:
         # --- פקודות ניהול חדשות ---
         self.application.add_handler(CommandHandler("schedule_summary", self.schedule_summary_command))
         self.application.add_handler(CommandHandler("show_schedule", self.show_schedule_command))
+        self.application.add_handler(CommandHandler("stats", self.show_stats))
         # שים לב: הפקודה cancel_schedule_command הוסרה כי היא מטופלת עכשיו בכפתור.
 
         # --- Handlers לקליטת פוסטים ---
@@ -221,6 +222,7 @@ class TelegramSummaryBot:
 👀 /preview - תצוגה מקדימה של הסיכום האחרון
 ⏰ /schedule_summary - הגדרת תזמון אוטומטי (בחירת שעה)
 📋 /show_schedule - הצגת סטטוס התזמון האוטומטי
+📈 /stats - הצגת סטטיסטיקות הבוט
 
 השתמש ב-/schedule_summary כדי לבחור שעת שליחה אוטומטית ביום שישי
 
@@ -595,6 +597,31 @@ class TelegramSummaryBot:
             await update.message.reply_text(friendly_text, parse_mode=ParseMode.HTML)
         else:
             await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
+
+    async def show_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """שולח לאדמין סטטיסטיקות על הבוט, כמו מספר הפוסטים השמורים."""
+        logger.info("Stats command received by user %s.", update.effective_user.id)
+        
+        # בדיקה שהפקודה מופעלת רק על ידי האדמין
+        if str(update.effective_user.id) != self.admin_chat_id:
+            logger.warning("Unauthorized user tried to use /stats.")
+            return
+
+        try:
+            # ביצוע שאילתת ספירה של כל המסמכים בקולקציה
+            post_count = self.posts_collection.count_documents({})
+            
+            # הרכבת הודעת התשובה
+            response_text = (
+                f"📊 <b>סטטיסטיקות הבוט</b> 📊\n\n"
+                f"נכון לעכשיו, שמורים במאגר הנתונים <b>{post_count}</b> פוסטים."
+            )
+            
+            await update.message.reply_text(response_text, parse_mode=ParseMode.HTML)
+            
+        except Exception as e:
+            logger.error(f"Failed to retrieve stats from database: {e}", exc_info=True)
+            await update.message.reply_text("שגיאה בקבלת הסטטיסטיקות ממאגר הנתונים.")
     
     def set_weekly_schedule(self, time_str: str):
         """קובע תזמון שבועי לשעה ספציפית ומבטל תזמונים קודמים."""
