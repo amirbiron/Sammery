@@ -225,20 +225,19 @@ class TelegramSummaryBot:
         welcome_message = """
 🤖 ברוך הבא לבוט הסיכומים השבועיים!
 
-הבוט יוצר סיכומים אוטומטיים של פוסטים מערוץ AndroidAndAI
+הבוט יוצר סיכומים אוטומטיים של פוסטים מערוץ AndroidAndAI.
 
-פקודות זמינות:
-📊 /generate_summary - יצירת סיכום ידני
-👀 /preview - תצוגה מקדימה של הסיכום האחרון
-⏰ /schedule_summary - הגדרת תזמון אוטומטי (בחירת שעה)
-📋 /show_schedule - הצגת סטטוס התזמון האוטומטי
-📈 /stats - הצגת סטטיסטיקות הבוט
+<b>פקודות זמינות:</b>
+📊 /generate_summary - יצירת סיכום ידני מיידי.
+👀 /preview - תצוגה מקדימה של הסיכום האחרון שנוצר.
+⏰ /schedule_summary - הגדרת שעת שליחה אוטומטית ביום שישי.
+📋 /show_schedule - הצגת סטטוס התזמון האוטומטי.
+📈 /stats - הצגת סטטיסטיקות על כמות הפוסטים השמורים.
 
-השתמש ב-/schedule_summary כדי לבחור שעת שליחה אוטומטית ביום שישי
-
-💡 טיפ: שלח לי תמונה או קובץ כדי לקבל את ה-file_id שלהם לשימוש במשתני הסביבה
-        """
-        await update.message.reply_text(welcome_message)
+<b>פקודות מתקדמות:</b>
+⚙️ /toggle_autopublish - הפעלה/כיבוי של מצב פרסום אוטומטי. במצב זה, הסיכום המתוזמן יפורסם ישירות לערוץ ללא צורך באישור ידני (שימושי כשאתה לא זמין).
+"""
+        await update.message.reply_text(welcome_message, parse_mode=ParseMode.HTML)
     
     async def get_channel_posts(self, days_back: int = 7) -> List[Dict]:
         """קריאת פוסטים מהימים האחרונים מ-MongoDB"""
@@ -688,24 +687,28 @@ class TelegramSummaryBot:
     async def toggle_autopublish_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודה להפעלה/כיבוי של מצב פרסום אוטומטי."""
         if str(update.effective_user.id) != self.admin_chat_id:
-            return  # רק לאדמין
+            return
 
-        # הופכים את המצב
+        # הופכים את המצב הקיים
         self.auto_publish_enabled = not self.auto_publish_enabled
 
         if self.auto_publish_enabled:
             status_text = "🟢 מופעל"
             message = (
-                "✅ מצב פרסום אוטומטי הופעל.\n\n"
-                "בפעם הבאה שהתזמון ירוץ, הסיכום יפורסם ישירות לערוץ. "
-                "לאחר הפרסום, המצב יתכבה אוטומטית ויחזור לאישור ידני."
+                f"<b>מצב פרסום אוטומטי: {status_text}</b>\n\n"
+                "הסיכום המתוזמן הבא יפורסם ישירות לערוץ ללא אישור.\n"
+                "המצב יתכבה אוטומטית לאחר הפרסום.\n\n"
+                "כדי לבטל, פשוט שלח את הפקודה /toggle_autopublish שוב."
             )
         else:
             status_text = "🔴 כבוי"
-            message = "❌ מצב פרסום אוטומטי כובה. הסיכומים ימשיכו להגיע אליך לאישור ידני."
+            message = (
+                f"<b>מצב פרסום אוטומטי: {status_text}</b>\n\n"
+                "הסיכומים ימשיכו להגיע אליך לאישור ידני כרגיל."
+            )
 
-        logger.info(f"Auto-publish mode toggled. New status: {status_text}")
-        await update.message.reply_text(message)
+        logger.info(f"Auto-publish mode toggled by admin. New status: {status_text}")
+        await update.message.reply_text(message, parse_mode=ParseMode.HTML)
     
     def set_weekly_schedule(self, time_str: str):
         """קובע תזמון שבועי לשעה ספציפית ומבטל תזמונים קודמים."""
