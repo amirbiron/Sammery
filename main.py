@@ -17,6 +17,14 @@ from flask import Flask
 from pymongo import MongoClient, DESCENDING
 
 # ===============================================
+# עדכון: תמיכה בשליחת תמונות באמצעות file_id
+# ===============================================
+# 1. נוספה פונקציה get_file_id שמחזירה file_id של תמונות וקבצים
+# 2. פונקציית publish_summary עודכנה לשלוח תמונה באמצעות משתנה הסביבה SUMMARY_IMAGE_FILE_ID
+# 3. כל התצוגות המקדימות כוללות כעת תמונה אם זמינה
+# 4. הוספת handler ל-PHOTO ו-Document.ALL בפונקציית _setup_handlers
+
+# ===============================================
 # שרת אינטרנט מינימלי עבור Render
 # ===============================================
 app = Flask(__name__)
@@ -83,6 +91,22 @@ class TelegramSummaryBot:
         # --- Handlers לקליטת פוסטים ---
         self.application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, self.handle_new_channel_post))
         self.application.add_handler(MessageHandler(filters.FORWARDED & ~filters.COMMAND, self.handle_forwarded_post))
+        
+        # --- Handler לקבלת file_id של תמונות וקבצים ---
+        self.application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, self.get_file_id))
+    
+    async def get_file_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """מדפיס את ה-file_id של כל תמונה או קובץ שנשלח לבוט."""
+        if update.message.photo:
+            # לוג עבור תמונה
+            file_id = update.message.photo[-1].file_id  # לוקחים את הגרסה הגדולה ביותר
+            logger.info(f"Received Photo. file_id: {file_id}")
+            await update.message.reply_text(f"קיבלתי תמונה.\nה-file_id שלה הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
+        elif update.message.document:
+            # לוג עבור קובץ כללי
+            file_id = update.message.document.file_id
+            logger.info(f"Received Document. file_id: {file_id}")
+            await update.message.reply_text(f"קיבלתי קובץ.\nה-file_id שלו הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
     
     async def handle_new_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """תופס פוסטים חדשים מהערוץ ושומר אותם ל-MongoDB"""
@@ -170,6 +194,8 @@ class TelegramSummaryBot:
 📋 /show_schedule - הצגת סטטוס התזמון האוטומטי
 
 השתמש ב-/schedule_summary כדי לבחור שעת שליחה אוטומטית ביום שישי
+
+💡 טיפ: שלח לי תמונה או קובץ כדי לקבל את ה-file_id שלהם לשימוש במשתני הסביבה
         """
         await update.message.reply_text(welcome_message)
     
@@ -293,11 +319,30 @@ class TelegramSummaryBot:
             ]
         ])
         
-        await update.message.reply_text(
-            f"תצוגה מקדימה:\n\n{self.pending_summary}",
-            reply_markup=keyboard,
-            parse_mode=ParseMode.HTML
-        )
+        # בדיקה אם יש תמונה לשליחה יחד עם התצוגה המקדימה
+        image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
+        if image_file_id:
+            try:
+                await update.message.reply_photo(
+                    photo=image_file_id,
+                    caption=f"תצוגה מקדימה:\n\n{self.pending_summary}",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+            except Exception as img_error:
+                logger.warning(f"Failed to send image with preview: {img_error}")
+                # אם נכשלה שליחת התמונה, נשלח רק טקסט
+                await update.message.reply_text(
+                    f"תצוגה מקדימה:\n\n{self.pending_summary}",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
+        else:
+            await update.message.reply_text(
+                f"תצוגה מקדימה:\n\n{self.pending_summary}",
+                reply_markup=keyboard,
+                parse_mode=ParseMode.HTML
+            )
     
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """טיפול בלחיצות על כל הכפתורים"""
@@ -322,10 +367,27 @@ class TelegramSummaryBot:
         # --- לוגיקה קיימת לסיכומים ---
         if query.data == "preview":
             if self.pending_summary:
-                await query.message.reply_text(
-                    f"תצוגה מקדימה:\n\n{self.pending_summary}",
-                    parse_mode=ParseMode.HTML
-                )
+                # בדיקה אם יש תמונה לשליחה יחד עם התצוגה המקדימה
+                image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
+                if image_file_id:
+                    try:
+                        await query.message.reply_photo(
+                            photo=image_file_id,
+                            caption=f"תצוגה מקדימה:\n\n{self.pending_summary}",
+                            parse_mode=ParseMode.HTML
+                        )
+                    except Exception as img_error:
+                        logger.warning(f"Failed to send image with preview: {img_error}")
+                        # אם נכשלה שליחת התמונה, נשלח רק טקסט
+                        await query.message.reply_text(
+                            f"תצוגה מקדימה:\n\n{self.pending_summary}",
+                            parse_mode=ParseMode.HTML
+                        )
+                else:
+                    await query.message.reply_text(
+                        f"תצוגה מקדימה:\n\n{self.pending_summary}",
+                        parse_mode=ParseMode.HTML
+                    )
             else:
                 await query.message.reply_text("אין סיכום זמין")
         
@@ -360,6 +422,19 @@ class TelegramSummaryBot:
     async def publish_summary(self) -> bool:
         """פרסום הסיכום לערוץ"""
         try:
+            # קבל את ה-file_id ממשתנה הסביבה
+            image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
+            if not image_file_id:
+                logger.warning("SUMMARY_IMAGE_FILE_ID is not set. Skipping image sending.")
+            else:
+                logger.info(f"Sending summary header image using file_id to channel {self.channel_username}...")
+                await self.application.bot.send_photo(
+                    chat_id=f"@{self.channel_username}",
+                    photo=image_file_id  # שימוש ב-file_id במקום בפתיחת קובץ
+                )
+                logger.info("Image sent successfully.")
+
+            # שליחת טקסט הסיכום
             await self.application.bot.send_message(
                 chat_id=f"@{self.channel_username}",
                 text=self.pending_summary,
@@ -390,12 +465,33 @@ class TelegramSummaryBot:
             
             self.pending_summary = summary
             
-            await self.application.bot.send_message(
-                chat_id=self.admin_chat_id,
-                text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
-                reply_markup=keyboard,
-                parse_mode=ParseMode.HTML
-            )
+            # בדיקה אם יש תמונה לשליחה יחד עם הודעת התצוגה המקדימה
+            image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
+            if image_file_id:
+                try:
+                    await self.application.bot.send_photo(
+                        chat_id=self.admin_chat_id,
+                        photo=image_file_id,
+                        caption=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.HTML
+                    )
+                except Exception as img_error:
+                    logger.warning(f"Failed to send image with scheduled summary preview: {img_error}")
+                    # אם נכשלה שליחת התמונה, נשלח רק טקסט
+                    await self.application.bot.send_message(
+                        chat_id=self.admin_chat_id,
+                        text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
+                        reply_markup=keyboard,
+                        parse_mode=ParseMode.HTML
+                    )
+            else:
+                await self.application.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
+                    reply_markup=keyboard,
+                    parse_mode=ParseMode.HTML
+                )
             
         except Exception as e:
             logger.error(f"שגיאה בסיכום המתוזמן: {e}")
