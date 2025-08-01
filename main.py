@@ -46,7 +46,6 @@ class TelegramSummaryBot:
         
         # אתחול הבוט
         self.application = Application.builder().token(self.bot_token).build()
-        self.bot = Bot(token=self.bot_token)
         
         # משתני מצב
         self.pending_summary = None
@@ -87,7 +86,7 @@ class TelegramSummaryBot:
 
             message_count = 0
             # הגדלתי את המגבלה ל-200 כדי להבטיח סריקה מספקת
-            async for message in self.bot.iter_history(f"@{self.channel_username}", limit=200):
+            async for message in self.application.bot.iter_history(f"@{self.channel_username}", limit=200):
                 message_count += 1
                 message_date_israel = message.date.astimezone(self.israel_tz)
 
@@ -259,7 +258,7 @@ class TelegramSummaryBot:
     async def publish_summary(self) -> bool:
         """פרסום הסיכום לערוץ"""
         try:
-            await self.bot.send_message(
+            await self.application.bot.send_message(
                 chat_id=f"@{self.channel_username}",
                 text=self.pending_summary,
                 parse_mode=ParseMode.HTML
@@ -289,7 +288,7 @@ class TelegramSummaryBot:
             
             self.pending_summary = summary
             
-            await self.bot.send_message(
+            await self.application.bot.send_message(
                 chat_id=self.admin_chat_id,
                 text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
                 reply_markup=keyboard,
@@ -298,7 +297,7 @@ class TelegramSummaryBot:
             
         except Exception as e:
             logger.error(f"שגיאה בסיכום המתוזמן: {e}")
-            await self.bot.send_message(
+            await self.application.bot.send_message(
                 chat_id=self.admin_chat_id,
                 text=f"שגיאה ביצירת הסיכום האוטומטי: {str(e)}"
             )
