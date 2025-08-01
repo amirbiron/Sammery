@@ -102,12 +102,16 @@ class TelegramSummaryBot:
             # לוג עבור תמונה
             file_id = update.message.photo[-1].file_id  # לוקחים את הגרסה הגדולה ביותר
             logger.info(f"Received Photo. file_id: {file_id}")
-            await update.message.reply_text(f"קיבלתי תמונה\\.\nה-file_id שלה הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
+            # נשתמש ב-HTML שהוא הרבה יותר נוח ובטוח למקרה הזה
+            response_text = f"קיבלתי תמונה.\nה-file_id שלה הוא:\n<code>{file_id}</code>"
+            await update.message.reply_text(response_text, parse_mode=ParseMode.HTML)
         elif update.message.document:
             # לוג עבור קובץ כללי
             file_id = update.message.document.file_id
             logger.info(f"Received Document. file_id: {file_id}")
-            await update.message.reply_text(f"קיבלתי קובץ\\.\nה-file_id שלו הוא:\n`{file_id}`", parse_mode=ParseMode.MARKDOWN_V2)
+            # נשתמש ב-HTML שהוא הרבה יותר נוח ובטוח למקרה הזה
+            response_text = f"קיבלתי קובץ.\nה-file_id שלו הוא:\n<code>{file_id}</code>"
+            await update.message.reply_text(response_text, parse_mode=ParseMode.HTML)
     
     async def error_handler(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """רושם שגיאות ושולח הודעת טלגרם לאדמין כאשר מתרחשת שגיאה."""
