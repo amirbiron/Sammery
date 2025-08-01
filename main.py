@@ -77,45 +77,48 @@ class TelegramSummaryBot:
         await update.message.reply_text(welcome_message)
     
     async def get_channel_posts(self, days_back: int = 7) -> List[Dict]:
-        """קריאת פוסטים מהערוץ מהימים האחרונים עם לוגים מפורטים"""
-        logger.info("--- Starting get_channel_posts ---")
+        """קריאת פוסטים מהערוץ מהימים האחרונים באמצעות get_chat_history"""
+        logger.info("--- Starting get_channel_posts (Corrected Method) ---")
         try:
             posts = []
             since_date = datetime.now(self.israel_tz) - timedelta(days=days_back)
             logger.info(f"Searching for posts since (Israel Time): {since_date.strftime('%Y-%m-%d %H:%M:%S')}")
 
-            message_count = 0
-            # הגדלתי את המגבלה ל-200 כדי להבטיח סריקה מספקת
-            async for message in self.application.bot.iter_history(f"@{self.channel_username}", limit=200):
-                message_count += 1
+            # שימוש בפונקציה הנכונה: get_chat_history
+            # היא מחזירה רשימה, לא גנרטור
+            messages = await self.application.bot.get_chat_history(
+                chat_id=f"@{self.channel_username}",
+                limit=200  # נסרוק עד 200 הודעות אחורה
+            )
+
+            logger.info(f"Retrieved {len(messages)} messages from history.")
+
+            for message in messages:
                 message_date_israel = message.date.astimezone(self.israel_tz)
 
-                logger.info(f"--- Checking message {message.message_id} ({message_count}) ---")
-                logger.info(f"  Message Date (UTC):    {message.date.strftime('%Y-%m-%d %H:%M:%S')}")
-                logger.info(f"  Message Date (Israel): {message_date_israel.strftime('%Y-%m-%d %H:%M:%S')}")
-
-                # בדיקת תנאי העצירה
+                # בדיקת תנאי העצירה - אם ההודעה ישנה מדי, נפסיק לעבד
                 if message_date_israel < since_date:
-                    logger.warning(f"  Message is older than since_date. Breaking loop.")
+                    logger.warning(f"Message {message.message_id} is older than since_date. Stopping processing.")
                     break
                 
-                # בדיקת תוכן ההודעה
+                # בדיקת תוכן ההודעה (טקסט או כיתוב)
                 post_content = message.text or message.caption
                 if post_content:
-                    logger.info(f"  Found content. Appending post.")
+                    logger.info(f"Found content in message {message.message_id}. Appending post.")
                     posts.append({
                         'date': message.date.strftime('%Y-%m-%d %H:%M'),
                         'text': post_content,
                         'message_id': message.message_id
                     })
                 else:
-                    logger.info(f"  No text or caption found for this message. Skipping.")
+                    logger.info(f"No text or caption found for message {message.message_id}. Skipping.")
 
             logger.info(f"--- Finished get_channel_posts ---")
-            logger.info(f"Checked a total of {message_count} messages. Found {len(posts)} posts with content.")
-            return posts[::-1]  # סדר כרונולוגי
+            logger.info(f"Processed messages. Found {len(posts)} posts with content.")
+            return posts[::-1]  # סדר כרונולוגי (מהישן לחדש)
             
         except Exception as e:
+            # הוספתי פרמטר exc_info=True כדי לקבל את כל פרטי השגיאה בלוג
             logger.error(f"FATAL ERROR in get_channel_posts: {e}", exc_info=True)
             return []
     
