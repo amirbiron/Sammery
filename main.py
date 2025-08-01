@@ -6,7 +6,7 @@ from typing import List, Dict
 import json
 import openai
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 from telegram.constants import ParseMode
 import schedule
 import time
@@ -70,6 +70,10 @@ class TelegramSummaryBot:
         self.application.add_handler(CommandHandler("generate_summary", self.generate_summary_command))
         self.application.add_handler(CommandHandler("preview", self.preview_command))
         self.application.add_handler(CallbackQueryHandler(self.button_callback))
+        self.application.add_handler(MessageHandler(filters.UpdateType.CHANNEL_POST, self.handle_new_channel_post))
+        
+        # --- הוסף את השורה הבאה ---
+        self.application.add_handler(MessageHandler(filters.FORWARDED & ~filters.COMMAND, self.handle_forwarded_post))
     
     async def handle_new_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """תופס פוסטים חדשים מהערוץ ושומר אותם ל-MongoDB"""
@@ -92,6 +96,56 @@ class TelegramSummaryBot:
             logger.info("Post saved successfully.")
         except Exception as e:
             logger.error(f"Error saving new post to MongoDB: {e}", exc_info=True)
+    
+    async def handle_forwarded_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        תופס הודעות המועברות לבוט, בודק אם הן מהערוץ הנכון, ושומר אותן ב-MongoDB.
+        זה מאפשר "מילוי לאחור" (backfill) ידני של פוסטים ישנים.
+        """
+        message = update.message
+        
+        # ודא שההודעה הועברה מהערוץ שלך
+        if not message.forward_origin:
+            await message.reply_text("אני יכול לשמור רק הודעות מועברות.")
+            return
+            
+        # בדיקה אם ההודעה הועברה מהערוץ הנכון
+        origin_chat = getattr(message.forward_origin, 'chat', None)
+        if not origin_chat or not hasattr(origin_chat, 'username') or origin_chat.username != self.channel_username:
+            await message.reply_text("אני יכול לשמור רק הודעות שהועברו מהערוץ הראשי.")
+            return
+
+        post_content = message.text or message.caption
+        
+        if not post_content:
+            await message.reply_text("לא ניתן לשמור הודעה ללא טקסט.")
+            return
+
+        # חילוץ פרטי ההודעה המקורית
+        original_message_id = message.forward_origin.message_id
+        original_date = message.forward_origin.date
+
+        logger.info(f"Manual backfill: Received forwarded post {original_message_id}. Saving to MongoDB.")
+        
+        post_document = {
+            'message_id': original_message_id,
+            'date': original_date,
+            'text': post_content
+        }
+        
+        try:
+            # שימוש ב-update_one עם upsert=True כדי למנוע כפילויות
+            self.posts_collection.update_one(
+                {'message_id': original_message_id},
+                {'$setOnInsert': post_document},
+                upsert=True
+            )
+            logger.info(f"Post {original_message_id} saved/updated successfully via forward.")
+            await message.reply_text(f"✅ הפוסט נשמר/עודכן בהצלחה!")
+            
+        except Exception as e:
+            logger.error(f"Error saving forwarded post to MongoDB: {e}", exc_info=True)
+            await message.reply_text("❌ אירעה שגיאה בשמירת הפוסט.")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """פקודת start"""
