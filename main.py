@@ -12,20 +12,17 @@ import schedule
 import time
 from threading import Thread
 import pytz
-
+import threading
 from flask import Flask
 
-# =======================================================
-# הוספת יישום Flask מינימלי
-# -------------------------------------------------------
-# זהו החלק ש-gunicorn מחפש.
-# הוא יוצר שרת אינטרנט קטן שעונה לבדיקות הבריאות של Render.
+# ===============================================
+# שרת אינטרנט מינימלי עבור Render
+# ===============================================
 app = Flask(__name__)
 
 @app.route('/')
 def health_check():
-    return "OK, I'm alive!", 200
-# =======================================================
+    return "OK, Bot is running!", 200
 
 # ... (שאר הקוד שלך, הגדרת הקלאס TelegramSummaryBot וכו') ...
 
@@ -320,10 +317,24 @@ class TelegramSummaryBot:
         finally:
             await self.application.stop()
 
-# נקודת כניסה
-async def main():
-    bot = TelegramSummaryBot()
-    await bot.run()
-
-if __name__ == "__main__":
+def start_bot_logic():
+    # נקודת כניסה
+    async def main():
+        bot = TelegramSummaryBot()
+        await bot.run()
+    
     asyncio.run(main())
+
+# =================================================================
+# הפעלת הבוט בתהליך רקע והשארת התהליך הראשי ל-Flask
+# =================================================================
+if __name__ == '__main__':
+    logging.info("Creating bot thread...")
+    bot_thread = threading.Thread(target=start_bot_logic)
+    bot_thread.daemon = True
+    bot_thread.start()
+    
+    logging.info("Starting Flask server for Render health checks...")
+    # לתשומת לבך: אין צורך להוסיף app.run() כאן.
+    # Gunicorn יריץ את האובייקט 'app' בעצמו.
+    # אנחנו משאירים את הבלוק הזה ריק בכוונה אחרי התחלת ה-thread.
