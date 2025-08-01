@@ -13,6 +13,22 @@ import time
 from threading import Thread
 import pytz
 
+from flask import Flask
+
+# =======================================================
+# הוספת יישום Flask מינימלי
+# -------------------------------------------------------
+# זהו החלק ש-gunicorn מחפש.
+# הוא יוצר שרת אינטרנט קטן שעונה לבדיקות הבריאות של Render.
+app = Flask(__name__)
+
+@app.route('/')
+def health_check():
+    return "OK, I'm alive!", 200
+# =======================================================
+
+# ... (שאר הקוד שלך, הגדרת הקלאס TelegramSummaryBot וכו') ...
+
 # הגדרת לוגים
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
