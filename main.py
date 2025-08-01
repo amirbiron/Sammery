@@ -50,6 +50,7 @@ class TelegramSummaryBot:
         
         # אתחול הבוט
         self.application = Application.builder().token(self.bot_token).build()
+        self.loop = asyncio.get_event_loop()
         
         # אתחול MongoDB
         mongo_uri = os.getenv('MONGODB_URI')
@@ -477,18 +478,35 @@ class TelegramSummaryBot:
         
         # קביעת התזמון החדש עם תג, שעה ואזור זמן
         schedule.every().friday.at(time_str, self.israel_tz).do(
-            lambda: asyncio.run_coroutine_threadsafe(self.scheduled_summary(), self.application.loop)
+            self.run_async_job, 
+            self.scheduled_summary
         ).tag('weekly-summary')
         
         logger.info(f"Weekly summary has been set for Friday at {time_str} (Israel Time).")
+    
+    def run_async_job(self, async_func):
+        """
+        מריץ פונקציה אסינכרונית מה-thread של schedule
+        באמצעות ה-event loop הראשי של הבוט.
+        """
+        logger.info(f"Scheduler is triggering async job: {async_func.__name__}")
+        # זה הקוד הקריטי: הוא שולח את המשימה לביצוע בלולאה הנכונה
+        asyncio.run_coroutine_threadsafe(async_func(), self.loop)
         
     def run_scheduler(self):
-        """הרצת ה-scheduler ברקע"""
-        # שמירת לולאת האירועים של ה-thread הראשי
-        self.application.loop = asyncio.get_event_loop()
+        """מריץ את לולאת התזמונים ב-thread נפרד."""
+        logger.info("Scheduler thread started.")
+        
+        # הגדרת המשימה המתוזמנת
+        # שים לב שאנחנו קוראים לפונקציית העזר החדשה
+        schedule.every().friday.at("16:00", "Asia/Jerusalem").do(
+            self.run_async_job, 
+            self.scheduled_summary
+        )
+
         while True:
             schedule.run_pending()
-            time.sleep(1) # בדיקה כל שנייה
+            time.sleep(1)
 
     def run_background_tasks(self):
         """
@@ -540,7 +558,8 @@ class TelegramSummaryBot:
         """הרצת הבוט"""
         try:
             # התחלת תזמון ברקע
-            scheduler_thread = Thread(target=self.run_scheduler, daemon=True)
+            scheduler_thread = Thread(target=self.run_scheduler, name="SchedulerThread")
+            scheduler_thread.daemon = True
             scheduler_thread.start()
             
             logger.info("הבוט מתחיל...")
