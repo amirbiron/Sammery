@@ -29,9 +29,10 @@ def health_check():
 
 # הגדרת לוגים
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    level=logging.INFO,
+    format='%(asctime)s - %(threadName)s - %(name)s - %(levelname)s - %(funcName)s:%(lineno)d - %(message)s',
 )
+# שורה זו יוצרת לוגר ייעודי לקובץ שלנו, שיראה את שם הקובץ בלוגים
 logger = logging.getLogger(__name__)
 
 class TelegramSummaryBot:
@@ -488,6 +489,52 @@ class TelegramSummaryBot:
         while True:
             schedule.run_pending()
             time.sleep(1) # בדיקה כל שנייה
+
+    def run_background_tasks(self):
+        """
+        מריץ את כל משימות הרקע ב-thread נפרד, עם לוגים מפורטים.
+        """
+        logger.info("Background tasks thread has started.")
+        
+        try:
+            # --- הגדרת שרת ה-Flask ---
+            flask_app = Flask('')
+            
+            @flask_app.route('/')
+            def home():
+                # לוג קצר כדי לראות ש-Render פונה לשרת שלנו
+                logger.debug("Keep-alive endpoint was pinged.")
+                return "I'm alive and checking schedules!"
+                
+            # הרצת שרת ה-Flask ב-thread נפרד כדי שלא יחסום את לולאת התזמונים
+            flask_thread = Thread(target=lambda: flask_app.run(host='0.0.0.0', port=8080), name="FlaskThread")
+            flask_thread.daemon = True
+            flask_thread.start()
+            
+            logger.info("Keep-alive server (Flask) started in a sub-thread.")
+
+            # --- לולאת התזמונים הראשית ---
+            logger.info("Scheduler loop is starting now.")
+            
+            # נוסיף לוג "פעימת לב" כל 10 דקות כדי לוודא שהלולאה לא נתקעה
+            heartbeat_interval = 600  # 10 דקות
+            last_heartbeat = time.time()
+            
+            while True:
+                schedule.run_pending()
+                
+                # בדיקת פעימת לב
+                if time.time() - last_heartbeat > heartbeat_interval:
+                    logger.info("Heartbeat: Background thread is still running and healthy.")
+                    last_heartbeat = time.time()
+                    
+                time.sleep(1) # חשוב לא להעמיס על המעבד
+
+        except Exception as e:
+            logger.critical(f"A critical error occurred in the background tasks thread: {e}", exc_info=True)
+        finally:
+            # הלוג הכי חשוב: אם אי פעם נגיע לכאן, נדע שה-thread עומד להסתיים
+            logger.warning("Background tasks thread is shutting down.")
     
     async def run(self):
         """הרצת הבוט"""
