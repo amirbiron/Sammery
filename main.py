@@ -520,6 +520,10 @@ class TelegramSummaryBot:
                 ).tag('weekly-summary')
                 logger.info(f"Successfully published. Rescheduled next run for next Friday at {run_time_str}.")
 
+            # --- הוספת דיווח פעילות ---
+            reporter.report_activity(self.admin_chat_id)
+            logger.info(f"Successfully reported activity for admin user {self.admin_chat_id}.")
+
             return True
 
         except Exception as e:
