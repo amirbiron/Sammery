@@ -159,24 +159,23 @@ class TelegramSummaryBot:
     
     async def handle_new_channel_post(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """תופס פוסטים חדשים מהערוץ ושומר אותם ל-MongoDB"""
-        reporter.report_activity(update.effective_user.id)
         message = update.channel_post
+        # בדוק אם יש תוכן טקסטואלי. אם לא, אין מה לשמור.
         post_content = message.text or message.caption
-        
         if not post_content:
             return
 
         logger.info(f"New post {message.message_id} detected in channel. Saving to MongoDB.")
-        
+
         new_post = {
             'message_id': message.message_id,
             'date': message.date,  # שמירת התאריך כאובייקט Datetime של Python
             'text': post_content
         }
-        
+
         try:
             self.posts_collection.insert_one(new_post)
-            logger.info("Post saved successfully.")
+            logger.info(f"Post {message.message_id} saved successfully.")
         except Exception as e:
             logger.error(f"Error saving new post to MongoDB: {e}", exc_info=True)
     
