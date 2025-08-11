@@ -88,6 +88,9 @@ class TelegramSummaryBot:
         self.pending_summary = None
         self.israel_tz = pytz.timezone('Asia/Jerusalem')
         self.auto_publish_enabled = False  # הוספת משתנה למצב פרסום אוטומטי (כבוי כברירת מחדל)
+        # נעילות למניעת הרצות כפולות במקביל
+        self.publish_lock = asyncio.Lock()
+        self.scheduled_job_lock = asyncio.Lock()
         
         # הוספת handlers
         self._setup_handlers()
@@ -479,61 +482,68 @@ class TelegramSummaryBot:
         שולח תמונת כותרת והודעת טקסט בנפרד, מנקה את המאגר,
         ומתזמן מחדש את הריצה הבאה כדי למנוע כפילויות.
         """
-        if not self.pending_summary:
-            logger.warning("publish_summary called but there is no pending summary.")
-            await self.application.bot.send_message(
-                chat_id=self.admin_chat_id,
-                text="ניסית לפרסם, אבל לא היה סיכום בהמתנה."
-            )
+        # מניעת הרצה כפולה
+        if self.publish_lock.locked():
+            logger.warning("publish_summary is already running. Skipping duplicate call.")
             return False
 
-        try:
-            # שלב 1: שליחת תמונת כותרת (הקוד הקיים שלך)
-            image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
-            if image_file_id:
-                logger.info("Found SUMMARY_IMAGE_FILE_ID. Sending header image...")
-                await self.application.bot.send_photo(
+        async with self.publish_lock:
+            if not self.pending_summary:
+                logger.warning("publish_summary called but there is no pending summary.")
+                await self.application.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text="ניסית לפרסם, אבל לא היה סיכום בהמתנה."
+                )
+                return False
+
+            try:
+                # שלב 1: שליחת תמונת כותרת (הקוד הקיים שלך)
+                image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
+                if image_file_id:
+                    logger.info("Found SUMMARY_IMAGE_FILE_ID. Sending header image...")
+                    await self.application.bot.send_photo(
+                        chat_id=f"@{self.channel_username}",
+                        photo=image_file_id
+                    )
+
+                # שלב 2: שליחת טקסט הסיכום (הקוד הקיים שלך)
+                logger.info("Sending summary text to the channel...")
+                await self.application.bot.send_message(
                     chat_id=f"@{self.channel_username}",
-                    photo=image_file_id
+                    text=self.pending_summary,
+                    parse_mode=ParseMode.HTML
                 )
 
-            # שלב 2: שליחת טקסט הסיכום (הקוד הקיים שלך)
-            logger.info("Sending summary text to the channel...")
-            await self.application.bot.send_message(
-                chat_id=f"@{self.channel_username}",
-                text=self.pending_summary,
-                parse_mode=ParseMode.HTML
-            )
+                # שלב 3: ניקוי הפוסטים מהמאגר (הקוד הקיים שלך)
+                logger.info("Summary published successfully. Clearing posts from the database...")
+                delete_result = self.posts_collection.delete_many({})
+                logger.info(f"Cleared {delete_result.deleted_count} posts from the collection.")
 
-            # שלב 3: ניקוי הפוסטים מהמאגר (הקוד הקיים שלך)
-            logger.info("Summary published successfully. Clearing posts from the database...")
-            delete_result = self.posts_collection.delete_many({})
-            logger.info(f"Cleared {delete_result.deleted_count} posts from the collection.")
+                # --- תוספת קריטית: איפוס ותזמון מחדש ---
+                jobs = schedule.get_jobs('weekly-summary')
+                if jobs:
+                    run_time_str = jobs[0].at_time.strftime('%H:%M')
+                    schedule.clear('weekly-summary')
+                    schedule.every().friday.at(run_time_str, self.israel_tz).do(
+                        self.run_async_job,
+                        self.scheduled_summary
+                    ).tag('weekly-summary')
+                    logger.info(f"Successfully published. Rescheduled next run for next Friday at {run_time_str}.")
 
-            # --- תוספת קריטית: איפוס ותזמון מחדש ---
-            jobs = schedule.get_jobs('weekly-summary')
-            if jobs:
-                run_time_str = jobs[0].at_time.strftime('%H:%M')
-                schedule.clear('weekly-summary')
-                schedule.every().friday.at(run_time_str, self.israel_tz).do(
-                    lambda: asyncio.run_coroutine_threadsafe(self.scheduled_summary(), self.application.loop)
-                ).tag('weekly-summary')
-                logger.info(f"Successfully published. Rescheduled next run for next Friday at {run_time_str}.")
+                # --- הוספת דיווח פעילות ---
+                reporter.report_activity(self.admin_chat_id)
+                logger.info(f"Successfully reported activity for admin user {self.admin_chat_id}.")
 
-            # --- הוספת דיווח פעילות ---
-            reporter.report_activity(self.admin_chat_id)
-            logger.info(f"Successfully reported activity for admin user {self.admin_chat_id}.")
+                return True
 
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to publish summary: {e}", exc_info=True)
-            await self.application.bot.send_message(
-                chat_id=self.admin_chat_id,
-                text=f"❌ נכשלתי בפרסום הסיכום לערוץ.\n<b>שגיאה:</b>\n<pre>{e}</pre>",
-                parse_mode=ParseMode.HTML
-            )
-            return False
+            except Exception as e:
+                logger.error(f"Failed to publish summary: {e}", exc_info=True)
+                await self.application.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=f"❌ נכשלתי בפרסום הסיכום לערוץ.\n<b>שגיאה:</b>\n<pre>{e}</pre>",
+                    parse_mode=ParseMode.HTML
+                )
+                return False
     
     async def scheduled_summary(self):
         """
@@ -543,78 +553,83 @@ class TelegramSummaryBot:
         logger.info("--- Scheduled summary job started ---")
         logger.info(f"Current auto-publish mode: {'ON' if self.auto_publish_enabled else 'OFF'}")
 
-        try:
-            posts = await self.get_channel_posts()
-            if not posts:
-                logger.info("No new posts found for scheduled summary. Aborting.")
-                await self.application.bot.send_message(
-                    chat_id=self.admin_chat_id,
-                    text="🤖 בוצע ניסיון סיכום אוטומטי, אך לא נמצאו פוסטים חדשים."
-                )
-                return
+        # מניעת הרצת job כפולה במקביל
+        if self.scheduled_job_lock.locked():
+            logger.warning("scheduled_summary is already running. Skipping duplicate trigger.")
+            return
 
-            summary = await self.create_summary_with_gpt4(posts)
-            self.pending_summary = summary
-
-            # --- לוגיקת המפסק ---
-            if self.auto_publish_enabled:
-                # מצב אוטומטי: פרסם ישירות
-                logger.info("Auto-publish is ON. Proceeding with direct publishing.")
-                success = await self.publish_summary()
-                if success:
+        async with self.scheduled_job_lock:
+            try:
+                posts = await self.get_channel_posts()
+                if not posts:
+                    logger.info("No new posts found for scheduled summary. Aborting.")
                     await self.application.bot.send_message(
                         chat_id=self.admin_chat_id,
-                        text="✅ הסיכום השבועי פורסם אוטומטית בהצלחה!"
+                        text="🤖 בוצע ניסיון סיכום אוטומטי, אך לא נמצאו פוסטים חדשים."
                     )
-                    # כבה את המצב האוטומטי חזרה לברירת המחדל הבטוחה
-                    self.auto_publish_enabled = False
-                    logger.info("Auto-publish mode has been reset to OFF after successful run.")
-            else:
-                # מצב ידני: שלח לאישור האדמין (ההתנהגות המקורית)
-                logger.info("Auto-publish is OFF. Sending for manual approval.")
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("📢 פרסם", callback_data="publish")],
-                    [InlineKeyboardButton("🔄 צור חדש", callback_data="regenerate")]
-                ])
-                
-                # בדיקה אם יש תמונה לשליחה יחד עם הודעת התצוגה המקדימה
-                image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
-                if image_file_id:
-                    try:
-                        await self.application.bot.send_photo(
+                    return
+
+                summary = await self.create_summary_with_gpt4(posts)
+                self.pending_summary = summary
+
+                # --- לוגיקת המפסק ---
+                if self.auto_publish_enabled:
+                    logger.info("Auto-publish is ON. Proceeding with direct publishing.")
+                    success = await self.publish_summary()
+                    if success:
+                        await self.application.bot.send_message(
                             chat_id=self.admin_chat_id,
-                            photo=image_file_id,
-                            caption=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
-                            reply_markup=keyboard,
-                            parse_mode=ParseMode.HTML
+                            text="✅ הסיכום השבועי פורסם אוטומטית בהצלחה!"
                         )
-                    except Exception as img_error:
-                        logger.warning(f"Failed to send image with scheduled summary preview: {img_error}")
-                        # אם נכשלה שליחת התמונה, נשלח רק טקסט
+                        # כבה את המצב האוטומטי חזרה לברירת המחדל הבטוחה
+                        self.auto_publish_enabled = False
+                        logger.info("Auto-publish mode has been reset to OFF after successful run.")
+                else:
+                    # מצב ידני: שלח לאישור האדמין (ההתנהגות המקורית)
+                    logger.info("Auto-publish is OFF. Sending for manual approval.")
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton("📢 פרסם", callback_data="publish")],
+                        [InlineKeyboardButton("🔄 צור חדש", callback_data="regenerate")]
+                    ])
+                    
+                    # בדיקה אם יש תמונה לשליחה יחד עם הודעת התצוגה המקדימה
+                    image_file_id = os.getenv("SUMMARY_IMAGE_FILE_ID")
+                    if image_file_id:
+                        try:
+                            await self.application.bot.send_photo(
+                                chat_id=self.admin_chat_id,
+                                photo=image_file_id,
+                                caption=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
+                                reply_markup=keyboard,
+                                parse_mode=ParseMode.HTML
+                            )
+                        except Exception as img_error:
+                            logger.warning(f"Failed to send image with scheduled summary preview: {img_error}")
+                            # אם נכשלה שליחת התמונה, נשלח רק טקסט
+                            await self.application.bot.send_message(
+                                chat_id=self.admin_chat_id,
+                                text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
+                                reply_markup=keyboard,
+                                parse_mode=ParseMode.HTML
+                            )
+                    else:
                         await self.application.bot.send_message(
                             chat_id=self.admin_chat_id,
                             text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
                             reply_markup=keyboard,
                             parse_mode=ParseMode.HTML
                         )
-                else:
-                    await self.application.bot.send_message(
-                        chat_id=self.admin_chat_id,
-                        text=f"סיכום שבועי אוטומטי מוכן! 📊\n\nתצוגה מקדימה:\n\n{summary}",
-                        reply_markup=keyboard,
-                        parse_mode=ParseMode.HTML
-                    )
 
-        except Exception as e:
-            logger.error(f"A critical error occurred in the scheduled_summary job: {e}", exc_info=True)
-            await self.application.bot.send_message(
-                chat_id=self.admin_chat_id,
-                text=f"שגיאה קריטית בתהליך הסיכום האוטומטי: {str(e)}"
-            )
-        finally:
-            # אל תנקה את pending_summary כאן, כי במצב ידני הוא נחוץ ללחיצת הכפתור
-            if self.auto_publish_enabled: # נקה רק אם היינו במצב אוטומטי
-                self.pending_summary = None
+            except Exception as e:
+                logger.error(f"A critical error occurred in the scheduled_summary job: {e}", exc_info=True)
+                await self.application.bot.send_message(
+                    chat_id=self.admin_chat_id,
+                    text=f"שגיאה קריטית בתהליך הסיכום האוטומטי: {str(e)}"
+                )
+            finally:
+                # אל תנקה את pending_summary כאן, כי במצב ידני הוא נחוץ ללחיצת הכפתור
+                if self.auto_publish_enabled:  # נקה רק אם היינו במצב אוטומטי
+                    self.pending_summary = None
     
     async def schedule_summary_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """מציג לאדמין כפתורים לבחירת שעת התזמון."""
@@ -764,12 +779,7 @@ class TelegramSummaryBot:
         """מריץ את לולאת התזמונים ב-thread נפרד."""
         logger.info("Scheduler thread started.")
         
-        # הגדרת המשימה המתוזמנת
-        # שים לב שאנחנו קוראים לפונקציית העזר החדשה
-        schedule.every().friday.at("16:00", "Asia/Jerusalem").do(
-            self.run_async_job, 
-            self.scheduled_summary
-        )
+        # אין תיזמון ברירת מחדל כאן. התיזמון מוגדר רק דרך set_weekly_schedule() כדי למנוע כפילויות.
 
         while True:
             schedule.run_pending()
