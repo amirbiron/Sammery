@@ -792,7 +792,8 @@ class TelegramSummaryBot:
         """דיווח תקופתי למוניטור כדי למנוע השעיה אוטומטית עקב חוסר פעילות."""
         try:
             logger.info("Keepalive heartbeat: reporting service activity to monitor.")
-            reporter.report_activity(self.admin_chat_id or "system")
+            # לעדכן רק את פעילות השירות ללא ספירת אינטראקציות משתמש
+            reporter.report_service_activity()
         except Exception as e:
             logger.warning(f"Keepalive heartbeat failed: {e}")
         
