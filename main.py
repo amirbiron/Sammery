@@ -5,7 +5,10 @@ from datetime import datetime, timedelta
 from typing import List, Dict
 import json
 import openai
-from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+from telegram.constants import ParseMode
+from telegram._botcommandscope import BotCommandScopeDefault, BotCommandScopeChat
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 from telegram.constants import ParseMode
 import schedule
@@ -955,6 +958,9 @@ class TelegramSummaryBot:
             logger.info("הבוט מתחיל...")
             await self.application.initialize()
             await self.application.start()
+
+            # קביעת תפריט פקודות (ברירת מחדל + אדמין)
+            await self.configure_command_menu()
             await self.application.updater.start_polling()
             
             # שמירה על הבוט פעיל
@@ -965,6 +971,44 @@ class TelegramSummaryBot:
             logger.error(f"שגיאה בהרצת הבוט: {e}")
         finally:
             await self.application.stop()
+
+    async def configure_command_menu(self):
+        """הגדרת תפריט הפקודות כך שיופיע בלחצן הפקודות בטלגרם."""
+        try:
+            # פקודות ברירת מחדל לכל המשתמשים
+            default_commands = [
+                BotCommand("start", "התחלה והצגת עזרה"),
+            ]
+            await self.application.bot.set_my_commands(
+                commands=default_commands,
+                scope=BotCommandScopeDefault()
+            )
+
+            # פקודות אדמין (רק בצ'אט של האדמין)
+            if self.admin_chat_id:
+                try:
+                    admin_chat_id_value = int(self.admin_chat_id)
+                except Exception:
+                    admin_chat_id_value = self.admin_chat_id
+
+                admin_commands = [
+                    BotCommand("generate_summary", "יצירת סיכום ידנית"),
+                    BotCommand("preview", "תצוגה מקדימה של הסיכום"),
+                    BotCommand("schedule_summary", "קביעת תזמון שבועי"),
+                    BotCommand("show_schedule", "הצגת סטטוס התזמון"),
+                    BotCommand("stats", "סטטיסטיקות הבוט"),
+                    BotCommand("toggle_autopublish", "הפעלת/כיבוי פרסום אוטומטי"),
+                    BotCommand("service_plan", "תוכנית השירות ב-Render"),
+                    BotCommand("list_free_services", "רשימת שירותים חינמיים"),
+                ]
+                await self.application.bot.set_my_commands(
+                    commands=admin_commands,
+                    scope=BotCommandScopeChat(chat_id=admin_chat_id_value)
+                )
+
+            logger.info("Telegram command menus were configured successfully.")
+        except Exception as e:
+            logger.warning(f"Failed to configure Telegram command menu: {e}")
 
 def start_bot_logic():
     # נקודת כניסה
