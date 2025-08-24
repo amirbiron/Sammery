@@ -65,6 +65,8 @@ class TelegramSummaryBot:
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')
         self.admin_id = self.admin_chat_id  # הוספת משתנה נוסף עבור error_handler
+        # שם השירות (לשימוש להצגת תוכנית)
+        self.service_name = reporter.service_name
         
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set!")
@@ -119,6 +121,9 @@ class TelegramSummaryBot:
         self.application.add_handler(CommandHandler("schedule_summary", self.schedule_summary_command))
         self.application.add_handler(CommandHandler("show_schedule", self.show_schedule_command))
         self.application.add_handler(CommandHandler("stats", self.show_stats))
+        # מידע על תוכנית השירות ב-Render
+        self.application.add_handler(CommandHandler("service_plan", self.service_plan_command))
+        self.application.add_handler(CommandHandler("list_free_services", self.list_free_services_command))
         # שים לב: הפקודה cancel_schedule_command הוסרה כי היא מטופלת עכשיו בכפתור.
 
         # --- הוספת handler למפסק האוטומטי ---
@@ -130,6 +135,89 @@ class TelegramSummaryBot:
         
         # --- Handler לקבלת file_id של תמונות וקבצים ---
         self.application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, self.get_file_id))
+
+    def detect_service_plan(self) -> str:
+        """ניסיון לזהות את תוכנית השירות (plan) של Render.
+        הקדימות: משתני סביבה -> קובץ render.yaml -> unknown.
+        """
+        env_plan = os.getenv('SERVICE_PLAN') or os.getenv('RENDER_PLAN')
+        if env_plan:
+            return env_plan.strip().lower()
+        # נסה לקרוא מתוך render.yaml
+        try:
+            possible_paths = ['render.yaml', '/app/render.yaml']
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    current_name = None
+                    for raw in lines:
+                        line = raw.strip()
+                        if line.startswith('name:'):
+                            current_name = line.split(':', 1)[1].strip()
+                        elif line.startswith('plan:') and current_name:
+                            plan_value = line.split(':', 1)[1].strip()
+                            if current_name == self.service_name:
+                                return plan_value.lower()
+                    # אם לא מצאנו לפי השם, נחזיר את ה-plan הראשון כגיבוי
+                    for raw in lines:
+                        line = raw.strip()
+                        if line.startswith('plan:'):
+                            return line.split(':', 1)[1].strip().lower()
+        except Exception:
+            pass
+        return 'unknown'
+
+    def list_free_services_from_yaml(self) -> list:
+        """מחזיר רשימת שמות שירותים שחינם מ-render.yaml אם קיים."""
+        result = []
+        try:
+            possible_paths = ['render.yaml', '/app/render.yaml']
+            for path in possible_paths:
+                if os.path.exists(path):
+                    with open(path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                    current_name = None
+                    for raw in lines:
+                        line = raw.strip()
+                        if line.startswith('name:'):
+                            current_name = line.split(':', 1)[1].strip()
+                        elif line.startswith('plan:') and current_name:
+                            plan_value = line.split(':', 1)[1].strip().lower()
+                            if plan_value == 'free':
+                                result.append(current_name)
+                            current_name = None
+                    break
+        except Exception:
+            pass
+        return result
+
+    async def service_plan_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """מציג את תוכנית השירות (plan) של השירות הנוכחי ב-Render."""
+        reporter.report_activity(update.effective_user.id)
+        if str(update.effective_user.id) != self.admin_chat_id:
+            return
+        plan = self.detect_service_plan()
+        is_free = (plan.lower() == 'free')
+        status = "חינמי" if is_free else ("לא ידוע" if plan == 'unknown' else "בתשלום")
+        message = (
+            f"📦 שם השירות: {self.service_name}\n"
+            f"🏷️ תוכנית: {plan}\n"
+            f"✅ סטטוס: {status}"
+        )
+        await update.message.reply_text(message)
+
+    async def list_free_services_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """מציג רשימת שירותים חינמיים מתוך render.yaml."""
+        reporter.report_activity(update.effective_user.id)
+        if str(update.effective_user.id) != self.admin_chat_id:
+            return
+        free_services = self.list_free_services_from_yaml()
+        if free_services:
+            names = "\n".join(free_services)
+            await update.message.reply_text(f"שירותים חינמיים שנמצאו בקובץ התצורה:\n{names}")
+        else:
+            await update.message.reply_text("לא נמצאו שירותים חינמיים בקובץ התצורה.")
     
     async def get_file_id(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """מדפיס את ה-file_id של כל תמונה או קובץ שנשלח לבוט."""
