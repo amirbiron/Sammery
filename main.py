@@ -94,6 +94,19 @@ class TelegramSummaryBot:
         
         # הוספת handlers
         self._setup_handlers()
+
+        # --- Keepalive heartbeat to avoid external auto-suspension due to inactivity ---
+        try:
+            self.keepalive_interval_hours = int(os.getenv('KEEPALIVE_HOURS', '24'))
+        except Exception:
+            self.keepalive_interval_hours = 24
+        # ננקה תזמוני keepalive קודמים ונגדיר חדש
+        schedule.clear('keepalive')
+        schedule.every(self.keepalive_interval_hours).hours.do(
+            self.run_async_job,
+            self.keepalive_heartbeat
+        ).tag('keepalive')
+        logger.info(f"Keepalive heartbeat scheduled every {self.keepalive_interval_hours} hours.")
     
     def _setup_handlers(self):
         """הגדרת handlers לבוט"""
@@ -774,6 +787,14 @@ class TelegramSummaryBot:
         logger.info(f"Scheduler is triggering async job: {async_func.__name__}")
         # זה הקוד הקריטי: הוא שולח את המשימה לביצוע בלולאה הנכונה
         asyncio.run_coroutine_threadsafe(async_func(), self.loop)
+
+    async def keepalive_heartbeat(self):
+        """דיווח תקופתי למוניטור כדי למנוע השעיה אוטומטית עקב חוסר פעילות."""
+        try:
+            logger.info("Keepalive heartbeat: reporting service activity to monitor.")
+            reporter.report_activity(self.admin_chat_id or "system")
+        except Exception as e:
+            logger.warning(f"Keepalive heartbeat failed: {e}")
         
     def run_scheduler(self):
         """מריץ את לולאת התזמונים ב-thread נפרד."""
