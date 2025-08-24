@@ -63,6 +63,32 @@ class SimpleActivityReporter:
             # שקט - אל תיכשל את הבוט אם יש בעיה
             pass
 
+    def report_service_activity(self):
+        """דיווח פעילות שירות בלבד (ללא הגדלת אינטראקציות משתמש)."""
+        if not self.connected:
+            return
+        try:
+            now = datetime.now(timezone.utc)
+            self.db.service_activity.update_one(
+                {"_id": self.service_id},
+                {
+                    "$set": {
+                        "last_user_activity": now,
+                        "service_name": self.service_name,
+                        "updated_at": now
+                    },
+                    "$setOnInsert": {
+                        "created_at": now,
+                        "status": "active",
+                        "total_users": 0,
+                        "suspend_count": 0
+                    }
+                },
+                upsert=True
+            )
+        except Exception:
+            pass
+
 # דוגמה לשימוש קל
 def create_reporter(mongodb_uri, service_id, service_name=None):
     """יצירת reporter פשוט"""
