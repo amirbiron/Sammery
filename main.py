@@ -959,8 +959,8 @@ class TelegramSummaryBot:
             await self.application.initialize()
             await self.application.start()
 
-            # קביעת תפריט פקודות (ברירת מחדל + אדמין)
-            await self.configure_command_menu()
+            # קביעת/עדכון תפריט פקודות (ברירת מחדל + אדמין) ללא דריסה
+            await self.configure_command_menu(append_only=True)
             await self.application.updater.start_polling()
             
             # שמירה על הבוט פעיל
@@ -972,17 +972,18 @@ class TelegramSummaryBot:
         finally:
             await self.application.stop()
 
-    async def configure_command_menu(self):
+    async def configure_command_menu(self, append_only: bool = False):
         """הגדרת תפריט הפקודות כך שיופיע בלחצן הפקודות בטלגרם."""
         try:
-            # פקודות ברירת מחדל לכל המשתמשים
-            default_commands = [
-                BotCommand("start", "התחלה והצגת עזרה"),
-            ]
-            await self.application.bot.set_my_commands(
-                commands=default_commands,
-                scope=BotCommandScopeDefault()
-            )
+            # פקודות ברירת מחדל לכל המשתמשים: אל תדרוס אם append_only=True
+            if not append_only:
+                default_commands = [
+                    BotCommand("start", "התחלה והצגת עזרה"),
+                ]
+                await self.application.bot.set_my_commands(
+                    commands=default_commands,
+                    scope=BotCommandScopeDefault()
+                )
 
             # פקודות אדמין (רק בצ'אט של האדמין)
             if self.admin_chat_id:
@@ -991,20 +992,27 @@ class TelegramSummaryBot:
                 except Exception:
                     admin_chat_id_value = self.admin_chat_id
 
-                admin_commands = [
-                    BotCommand("generate_summary", "יצירת סיכום ידנית"),
-                    BotCommand("preview", "תצוגה מקדימה של הסיכום"),
-                    BotCommand("schedule_summary", "קביעת תזמון שבועי"),
-                    BotCommand("show_schedule", "הצגת סטטוס התזמון"),
-                    BotCommand("stats", "סטטיסטיקות הבוט"),
-                    BotCommand("toggle_autopublish", "הפעלת/כיבוי פרסום אוטומטי"),
-                    BotCommand("service_plan", "תוכנית השירות ב-Render"),
-                    BotCommand("list_free_services", "רשימת שירותים חינמיים"),
+                # שלוף פקודות נוכחיות לצ'אט האדמין, הוסף רק את החדשות
+                try:
+                    existing = await self.application.bot.get_my_commands(scope=BotCommandScopeChat(chat_id=admin_chat_id_value))
+                except Exception:
+                    existing = []
+                existing_names = {cmd.command for cmd in existing}
+
+                to_add = [
+                    ("service_plan", "תוכנית השירות ב-Render"),
+                    ("list_free_services", "רשימת שירותים חינמיים"),
                 ]
-                await self.application.bot.set_my_commands(
-                    commands=admin_commands,
-                    scope=BotCommandScopeChat(chat_id=admin_chat_id_value)
-                )
+                new_admin_commands = list(existing)
+                for name, desc in to_add:
+                    if name not in existing_names:
+                        new_admin_commands.append(BotCommand(name, desc))
+
+                if new_admin_commands != existing:
+                    await self.application.bot.set_my_commands(
+                        commands=new_admin_commands,
+                        scope=BotCommandScopeChat(chat_id=admin_chat_id_value)
+                    )
 
             logger.info("Telegram command menus were configured successfully.")
         except Exception as e:
