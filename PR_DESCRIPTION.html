@@ -1,0 +1,76 @@
+<h2>עדכון תלות: python-telegram-bot ל־21.x כדי להחזיר תמיכה ב־forward_origin</h2>
+
+<h3>תקציר</h3>
+<p>
+תיקון תקלה קריטית שבה הבוט קרס בעת העברת פוסט ידנית לבוט (backfill) עקב שימוש בשדה <code>message.forward_origin</code> שאינו נתמך ב־PTB 20.x.
+הפתרון: עדכון התלות ל־<strong>python-telegram-bot&gt;=21,&lt;22</strong>, שבה השדה נתמך.
+</p>
+
+<h3>בעיה</h3>
+<p>בעת העברת פוסט ידנית לבוט התקבלה השגיאה הבאה:</p>
+<pre><code>AttributeError: 'Message' object has no attribute 'forward_origin'
+  File "/app/main.py", line 210, in handle_forwarded_post
+    if not message.forward_origin:
+</code></pre>
+
+<h3>סיבת השורש</h3>
+<ul>
+  <li><strong>חוסר תאימות גרסאות:</strong> הקוד נשען על <code>message.forward_origin</code> (זמין ב־PTB 21.x), בעוד שב־15/09 הוצמדה התלות ל־<strong>20.7</strong> שבה השדה אינו קיים.</li>
+  <li>ב־04/09 זה עבד משום שהדיפלוי רץ עם PTB 21.x, ולכן השדה היה קיים.</li>
+</ul>
+
+<h3>שינויים הכלולים ב‑PR</h3>
+<ul>
+  <li><strong>requirements.txt:</strong> עדכון התלות:
+    <pre><code>python-telegram-bot[job-queue] &gt;= 21,&lt;22</code></pre>
+  </li>
+  <li><strong>אין שינויי קוד לוגיקה</strong> (רק עדכון תלות) כדי להחזיר מיידית את התמיכה ב־forward_origin.</li>
+</ul>
+
+<h3>השפעות וסיכונים</h3>
+<ul>
+  <li><strong>PTB v21:</strong> בגרסה זו בוצעו שינויים שוברים. בפרט, רכיב <code>Updater</code> הוסר, ועלול לדרוש התאמה ללוגיקת האתחול/פולינג.
+    <br/>בפרויקט יש שימוש ב‑<code>application.updater.start_polling()</code>. אם זה ישבר לאחר העדכון, נדרש Follow‑Up לשינוי לאחד הדפוסים הנתמכים (למשל <code>Application.run_polling()</code> או רצף <code>initialize/start/stop</code> תואם).</li>
+  <li>מלבד זאת, אין שינויים התנהגותיים צפויים; התיקון מחזיר את התמיכה ב‑forward_origin ומפסיק את הקריסה בעת backfill.</li>
+</ul>
+
+<h3>תוכנית בדיקות</h3>
+<ol>
+  <li><strong>Backfill ידני:</strong> להעביר פוסט מהערוץ <code>@AndroidAndAI</code> לבוט.
+    <ul>
+      <li>מצופה: אין קריסה, מתקבלת תשובת הצלחה בבוט (✅), ונוצר/מועדה מסמך ב‑MongoDB עם <code>message_id</code>, <code>date</code>, <code>text</code>.</li>
+    </ul>
+  </li>
+  <li><strong>פוסט חדש בערוץ:</strong> לפרסם פוסט חדש, לוודא שנשמר ללא שגיאות בלוגים.</li>
+  <li><strong>/stats:</strong> לאשר שהמונה משקף את מספר הפוסטים לאחר השמירה.</li>
+  <li><strong>סיכום ידני:</strong> להריץ <code>/generate_summary</code> ו‑<code>/preview</code>, לוודא שאין רגרסיות.</li>
+  <li><strong>תצוגות עם תמונה:</strong> לוודא ששליחת תמונה/מסמך לבוט מחזירה <code>file_id</code> כמצופה.</li>
+</ol>
+
+<h3>פריסה</h3>
+<ul>
+  <li>לאחר המיזוג, ביצוע <strong>Deploy</strong> מחדש ב‑Render כדי להתקין את התלות המעודכנת.</li>
+  <li>מעקב לוגים בזמן אמת לווידוא היעדר אזהרות/שגיאות הקשורות ל‑PTB v21.</li>
+</ul>
+
+<h3>מעקב/ניטור</h3>
+<ul>
+  <li>לעקוב אחר שורות לוג בסגנון: <code>Error notification sent to admin (...)</code> או חריגות ב‑<code>handle_forwarded_post</code>.</li>
+</ul>
+
+<h3>תוכנית חירום (Rollback)</h3>
+<ul>
+  <li>במידה ונדרש: Rollback לדיפלוי מ‑04/09 (שכלל PTB 21.x) או חזרה לקומיט קודם.</li>
+</ul>
+
+<h3>Follow‑Ups מומלצים (מחוץ ל‑PR הזה)</h3>
+<ol>
+  <li><strong>התאמת אתחול הבוט לדפוס PTB v21:</strong> מעבר ל‑<code>Application.run_polling()</code> או הסרת תלות ב‑<code>application.updater</code> אם נדרש.</li>
+  <li><strong>בדיקת רגרסיות:</strong> מעבר זריז על כל ה‑handlers לווידוא תאימות מלאה ל‑PTB v21.</li>
+</ol>
+
+<h3>קישוריות</h3>
+<ul>
+  <li>Migration Guide ל‑PTB 21.x (לרקע על השינויים השוברים).</li>
+</ul>
+
