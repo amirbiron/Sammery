@@ -43,16 +43,18 @@
 - `OPENAI_API_KEY`: מפתח ה-API שלך מ-OpenAI.
 - `ADMIN_CHAT_ID`: ה-ID המספרי שלך בטלגרם. ניתן להשיג אותו על ידי שליחת הודעה ל-@[userinfobot](https://t.me/userinfobot).
 - `MONGODB_URI`: מחרוזת החיבור המלאה שהעתקת מ-MongoDB Atlas.
+- `DEFAULT_SCHEDULE_TIME` (אופציונלי): שעת ברירת־מחדל ליצירת תזמון אוטומטי בכל עלייה (ברירת־מחדל: `16:00`, שעון ישראל).
+- `AUTO_PUBLISH_ON_START` (אופציונלי): אם `true`, יריץ את הפרסום אוטומטית לאחר יצירת הסיכום המתוזמן הקרוב.
+- `SUMMARY_IMAGE_FILE_ID` (אופציונלי): `file_id` של תמונת כותרת לפרסום עם הסיכום.
 
-### 5. הרצה על Render
+### 5. הרצה על Render / Railway (Docker)
 1. העלה את כל קבצי הפרויקט ל-Repository ב-GitHub.
 2. ב-Render, צור **Web Service** חדש וחבר אותו ל-Repository.
-3. בהגדרות השירות:
-   - **Environment**: `Python 3`
-   - **Build Command**: `pip install -r requirements.txt`
-   - **Start Command**: `python3 main.py`
-4. הוסף את כל משתני הסביבה תחת לשונית **Environment**.
-5. לחץ על **Create Web Service**. הבוט יתחיל לפעול.
+3. להרצה ב-Docker, התמונה מריצה `gunicorn` על פורט `8000` ומגישה נתיב בריאות `/`. ודא שהפלטפורמה ממפה לפורט זה (ב-Railway/Render זה נעשה אוטומטית לפי `EXPOSE`).
+4. הוסף את כל משתני הסביבה תחת לשונית **Environment** וודא שה-`MONGODB_URI` מוגדר.
+5. לאחר פריסה ראשונה, ניתן להגדיר `DEFAULT_SCHEDULE_TIME` כדי לשחזר תזמון אוטומטי בכל עלייה, ללא צורך בפקודה ידנית.
+
+> הערה חשובה: ריצה בסביבת Serverless (כגון Vercel Functions) אינה נתמכת לבוטי Polling של Telegram. יש להריץ כ-Service מתמשך (Render/Railway/VM/K8s).
 
 ## ⚙️ פקודות זמינות (לאדמין בלבד)
 

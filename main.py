@@ -65,6 +65,9 @@ class TelegramSummaryBot:
         self.openai_api_key = os.getenv('OPENAI_API_KEY')
         self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')
         self.admin_id = self.admin_chat_id  # הוספת משתנה נוסף עבור error_handler
+        # שליטה בהתנהגות ברירת מחדל דרך משתני סביבה
+        self.default_schedule_time = os.getenv('DEFAULT_SCHEDULE_TIME', '16:00')  # ברירת־מחדל: 16:00
+        self.auto_publish_on_start = os.getenv('AUTO_PUBLISH_ON_START', 'false').lower() in ("1", "true", "yes", "on")
         
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set!")
@@ -94,6 +97,19 @@ class TelegramSummaryBot:
         
         # הוספת handlers
         self._setup_handlers()
+
+        # הפעלת מצב פרסום אוטומטי אם התבקש מהסביבה
+        if self.auto_publish_on_start:
+            self.auto_publish_enabled = True
+            logger.info("Auto-publish mode enabled on startup via env variable AUTO_PUBLISH_ON_START=true.")
+
+        # שחזור תזמון ברירת־מחדל אם סופק
+        if self.default_schedule_time:
+            try:
+                self.set_weekly_schedule(self.default_schedule_time)
+                logger.info(f"Default weekly schedule restored from env. Friday at {self.default_schedule_time} (Israel Time).")
+            except Exception as schedule_error:
+                logger.error(f"Failed to restore default schedule from env DEFAULT_SCHEDULE_TIME: {schedule_error}")
     
     def _setup_handlers(self):
         """הגדרת handlers לבוט"""
@@ -869,7 +885,17 @@ def start_bot_logic():
 # כך ש-Gunicorn יפעיל אותו בעת הייבוא.
 # =================================================================
 logging.info("Creating bot thread to run in the background...")
-bot_thread = threading.Thread(target=start_bot_logic)
+
+# עטיפה בהגנת חריגות כדי שלא נישאר בלי לוגים במקרה של כישלון אתחול
+def _safe_start_bot_logic():
+    try:
+        # שחזור תזמון ברירת־מחדל אם הוגדר במשתני סביבה
+        # ההגדרה מתבצעת בתוך הלוגיקה של הבוט לאחר היצירה
+        start_bot_logic()
+    except Exception as e:
+        logging.critical(f"Bot background thread failed to start: {e}", exc_info=True)
+
+bot_thread = threading.Thread(target=_safe_start_bot_logic)
 bot_thread.daemon = True
 bot_thread.start()
 

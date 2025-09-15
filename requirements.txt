@@ -1,5 +1,5 @@
-openai
-python-telegram-bot[job-queue]
+openai>=1.35.0,<2
+python-telegram-bot[job-queue]==20.7
 schedule
 pymongo
 dnspython
