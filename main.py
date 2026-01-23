@@ -68,7 +68,8 @@ class TelegramSummaryBot:
         self.admin_chat_id = os.getenv('ADMIN_CHAT_ID')
         self.admin_id = self.admin_chat_id  # הוספת משתנה נוסף עבור error_handler
         # שליטה בהתנהגות ברירת מחדל דרך משתני סביבה
-        self.default_schedule_time = os.getenv('DEFAULT_SCHEDULE_TIME', '16:00')  # ברירת־מחדל: 16:00
+        raw_schedule_time = os.getenv('DEFAULT_SCHEDULE_TIME')
+        self.default_schedule_time = raw_schedule_time.strip() if raw_schedule_time else None  # ברירת־מחדל: ללא תזמון
         self.auto_publish_on_start = os.getenv('AUTO_PUBLISH_ON_START', 'false').lower() in ("1", "true", "yes", "on")
         
         if not self.openai_api_key:
