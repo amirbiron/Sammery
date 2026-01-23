@@ -1,4 +1,5 @@
 import os
+import re
 import logging
 import asyncio
 from datetime import datetime, timedelta
@@ -56,6 +57,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
+BR_TAG_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
 class TelegramSummaryBot:
     def __init__(self):
@@ -110,6 +112,12 @@ class TelegramSummaryBot:
                 logger.info(f"Default weekly schedule restored from env. Friday at {self.default_schedule_time} (Israel Time).")
             except Exception as schedule_error:
                 logger.error(f"Failed to restore default schedule from env DEFAULT_SCHEDULE_TIME: {schedule_error}")
+
+    def _sanitize_html_for_telegram(self, text: str) -> str:
+        """החלפת תגיות <br> בשבירות שורה שתומכות בטלגרם."""
+        if not text:
+            return text
+        return BR_TAG_RE.sub("\n", text)
     
     def _setup_handlers(self):
         """הגדרת handlers לבוט"""
@@ -351,6 +359,7 @@ class TelegramSummaryBot:
             )
             
             summary = response.choices[0].message.content.strip()
+            summary = self._sanitize_html_for_telegram(summary)
             logger.info("Successfully received summary from OpenAI.")
             return summary
             
