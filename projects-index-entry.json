@@ -1,0 +1,11 @@
+{
+  "name": "Sammery - בוט סיכומים שבועיים לטלגרם",
+  "repo": "https://github.com/amirbiron/Sammery",
+  "tags": ["telegram-bot", "python", "openai", "gpt-4", "mongodb", "docker", "automation", "nlp"],
+  "highlights": [
+    "בוט טלגרם ליצירת סיכומים שבועיים אוטומטיים מפוסטי ערוץ באמצעות GPT-4",
+    "תזמון גמיש עם ממשק כפתורים ותצוגה מקדימה לפני פרסום",
+    "אחסון פוסטים ב-MongoDB Atlas עם תמיכה באכלוס היסטורי",
+    "פריסה על Render עם Docker, Flask ו-Gunicorn"
+  ]
+}
