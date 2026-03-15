@@ -3,7 +3,7 @@ import re
 import logging
 import asyncio
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 import json
 import openai
 from telegram import Bot, Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -58,6 +58,7 @@ logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 BR_TAG_RE = re.compile(r"<br\s*/?>", re.IGNORECASE)
+TIME_INPUT_RE = re.compile(r"^([01]?\d|2[0-3])(?::([0-5]\d))?$")
 
 class TelegramSummaryBot:
     def __init__(self):
@@ -119,6 +120,32 @@ class TelegramSummaryBot:
         if not text:
             return text
         return BR_TAG_RE.sub("\n", text)
+
+    def _normalize_time_input(self, time_input: str) -> Optional[str]:
+        """מנרמל קלט שעה לפורמט HH:MM, או מחזיר None אם לא תקין."""
+        match = TIME_INPUT_RE.match(time_input.strip())
+        if not match:
+            return None
+        hour = int(match.group(1))
+        minute = int(match.group(2) or 0)
+        return f"{hour:02d}:{minute:02d}"
+
+    def _get_weekly_schedule_time(self) -> Optional[str]:
+        """מחזיר את שעת התזמון השבועי הנוכחי (HH:MM) או None."""
+        jobs = schedule.get_jobs('weekly-summary')
+        if not jobs:
+            return None
+        if not jobs[0].at_time:
+            return None
+        return jobs[0].at_time.strftime("%H:%M")
+
+    def _cancel_weekly_schedule(self) -> Optional[str]:
+        """מבטל תזמון שבועי קיים ומחזיר את שעתו הקודמת."""
+        current_time = self._get_weekly_schedule_time()
+        if current_time is None:
+            return None
+        schedule.clear('weekly-summary')
+        return current_time
     
     def _setup_handlers(self):
         """הגדרת handlers לבוט"""
@@ -130,6 +157,7 @@ class TelegramSummaryBot:
         # --- פקודות ניהול חדשות ---
         self.application.add_handler(CommandHandler("schedule_summary", self.schedule_summary_command))
         self.application.add_handler(CommandHandler("show_schedule", self.show_schedule_command))
+        self.application.add_handler(CommandHandler("cancel_schedule", self.cancel_schedule_command))
         self.application.add_handler(CommandHandler("stats", self.show_stats))
         # שים לב: הפקודה cancel_schedule_command הוסרה כי היא מטופלת עכשיו בכפתור.
 
@@ -271,6 +299,7 @@ class TelegramSummaryBot:
 👀 /preview - תצוגה מקדימה של הסיכום האחרון שנוצר.
 ⏰ /schedule_summary - הגדרת שעת שליחה אוטומטית ביום שישי.
 📋 /show_schedule - הצגת סטטוס התזמון האוטומטי.
+🛑 /cancel_schedule - ביטול תזמון אוטומטי (אפשר לציין שעה, למשל 16:00).
 📈 /stats - הצגת סטטיסטיקות על כמות הפוסטים השמורים.
 
 <b>פקודות מתקדמות:</b>
@@ -454,9 +483,12 @@ class TelegramSummaryBot:
             return
 
         if data == "schedule_cancel_existing":
-            schedule.clear('weekly-summary')
-            logger.info("Weekly summary schedule has been cancelled by the admin via button.")
-            await query.edit_message_text("✅ התזמון האוטומטי בוטל.")
+            canceled_time = self._cancel_weekly_schedule()
+            if canceled_time:
+                logger.info("Weekly summary schedule has been cancelled by the admin via button.")
+                await query.edit_message_text(f"✅ התזמון האוטומטי בוטל (שישי {canceled_time}).")
+            else:
+                await query.edit_message_text("❌ לא קיים תזמון אוטומטי פעיל.")
             return
 
         # --- לוגיקה קיימת לסיכומים ---
@@ -737,6 +769,38 @@ class TelegramSummaryBot:
             await update.message.reply_text(friendly_text, parse_mode=ParseMode.HTML)
         else:
             await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
+
+    async def cancel_schedule_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """פקודה לביטול תזמון אוטומטי (אפשר לציין שעה)."""
+        reporter.report_activity(update.effective_user.id)
+        if str(update.effective_user.id) != self.admin_chat_id:
+            await update.message.reply_text("אין לך הרשאה להשתמש בפקודה זו.")
+            return
+
+        current_time = self._get_weekly_schedule_time()
+        if not current_time:
+            await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
+            return
+
+        if context.args:
+            requested_time = self._normalize_time_input(context.args[0])
+            if not requested_time:
+                await update.message.reply_text("⛔ פורמט שעה לא תקין. השתמש לדוגמה: /cancel_schedule 16:00")
+                return
+            if requested_time != current_time:
+                await update.message.reply_text(
+                    f"⚠️ קיים תזמון אוטומטי ביום שישי ב-{current_time}.\n"
+                    "כדי לבטל בכל מקרה, שלח /cancel_schedule ללא שעה."
+                )
+                return
+
+        canceled_time = self._cancel_weekly_schedule()
+        if not canceled_time:
+            await update.message.reply_text("❌ לא קיים תזמון אוטומטי פעיל.")
+            return
+
+        logger.info("Weekly summary schedule has been cancelled by the admin via /cancel_schedule.")
+        await update.message.reply_text(f"✅ התזמון האוטומטי בוטל (שישי {canceled_time}).")
 
     async def show_stats(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """שולח לאדמין סטטיסטיקות על הבוט, כמו מספר הפוסטים השמורים."""
